@@ -10,7 +10,7 @@ from firedrake import op2
 import pickle
 
 import torch # for ML implimentation #TODO: move this somewhere else?
-
+import os # temp
 
 def split_into_scalars(f):
     """
@@ -35,7 +35,6 @@ def split_into_scalars(f):
             return {0: [fd.assemble(interpolate(f[i], fs)) for i in range(V.shape[0])]}
         subspaces = [V.sub(i) for i in range(len(V.node_count))]
         ret = {}
-        #for i, (Vi, fi) in enumerate(zip(subspaces, f.split())):#ej321 split depreciated
         for i, (Vi, fi) in enumerate(zip(subspaces, f.subfunctions)): #ej321 use subfuctions
             if len(Vi.shape) == 0:
                 ret[i] = [fi]
@@ -60,30 +59,29 @@ def get_hessians(f, metric_parameters=None, **kwargs):
     :return: list of Hessians of each
         component
     """
-    # print(f'\n GET HESSIAN {metric_parameters}')
     metrics = []
     for i, fi in split_into_scalars(f).items():
         for j,fij in enumerate(fi):
 
-            M = ani.metric.RiemannianMetric(f.function_space().mesh()) #ej321 - move upfront
+            M = ani.metric.RiemannianMetric(f.function_space().mesh())
 
-            # ej321 - add set parameters for min parameters to run
+            #add set parameters for min parameters to run
             if metric_parameters is not None:
                 M.set_parameters(metric_parameters)
             else:
-#                 pass
                 M.set_parameters({
                     'dm_plex_metric_target_complexity':4000, # set quite complex
                     'dm_plex_metric_p': np.inf
                     })
             M.compute_hessian(fij, **kwargs)
 #             M.enforce_spd(restrict_sizes=True) # from Joe's workflow - trying to match - makes a big difference
-            M.normalise(restrict_sizes=False, restrict_anisotropy=False) # ej321 add explicit defaults so no enforce constraints done
+            M.normalise(restrict_sizes=False, restrict_anisotropy=False) # add explicit defaults so no enforce constraints done
             metrics.append(M)
+            # QC:
             # File(f"/data0/firedrake_mar2023/src/nn_adapt/examples/steady_turbine/outputs/aligned/GO/hessian_loop.pvd").write(metric)
             # File(f"/data0/firedrake_mar2023/src/nn_adapt/examples/steady_turbine/outputs/aligned/GO/fij_loop.pvd").write(fij)
             # breakpoint()
-    # print("\n\n", metrics)
+
     return metrics
 
 def extract_components(matrix):
@@ -95,13 +93,13 @@ def extract_components(matrix):
     a way that we avoid errors relating to arguments
     zero and :math:`2\pi` being equal.
     """
-    # print(matrix)
-    matrix_p0 = ani.metric.P0Metric(matrix) #ej321 added - call to pyroteus P0 class wrapper for RiemannianMetric
-    density, quotients, evecs = matrix_p0.density_and_quotients(reorder=True) #ej321 refactor for updated location of method
+    matrix_p0 = ani.metric.P0Metric(matrix) #call P0 class wrapper for RiemannianMetric
+    density, quotients, evecs = matrix_p0.density_and_quotients(reorder=True)
     fs = density.function_space()
     ar = fd.assemble(interpolate(ufl.sqrt(quotients[1]), fs))
     armin = ar.vector().gather().min()
-    if np.isclose(armin, 1.0, rtol=1e-08, atol=1e-08, equal_nan=False): #ej321 - one 0.99999999 possible - need an edge case?
+    #TODO: one 0.99999999 possible - needed edge case?
+    if np.isclose(armin, 1.0, rtol=1e-08, atol=1e-08, equal_nan=False):
         armin = 1.0
     assert armin >= 1.0, f"An element has aspect ratio is less than one ({armin})"
     theta = fd.assemble(interpolate(ufl.atan(evecs[1, 1] / evecs[1, 0]), fs))
@@ -138,11 +136,11 @@ def get_values_at_elements(f):
     P0_vec = fd.VectorFunctionSpace(mesh, "DG", 0, dim=size)
     values = fd.Function(P0_vec)
     keys = {"vertexwise": (f, op2.READ), "elementwise": (values, op2.INC)}
-    # ej321 - original code - C style which is depreciated in firedrake
+    # original code - C style which is depreciated in firedrake
     # kernel = "for (int i=0; i < vertexwise.dofs; i++) elementwise[i] += vertexwise[i];" 
     # firedrake.par_loop(kernel, ufl.dx, keys)
 
-    # ej321 loopy format refactoring like with clement interpolation in pyroteus
+    # loopy format refactoring like with clement interpolation in pyroteus
     domain_op2 = '{[i]: 0 <= i < vertexwise.dofs}' 
     instructions = '''
     for i
@@ -152,11 +150,9 @@ def get_values_at_elements(f):
     fd.par_loop(
         (domain_op2,instructions), ufl.dx, 
         keys
-    # ,is_loopy_kernel=True # ej321 - depreciated, throws warning
+    # ,is_loopy_kernel=True # depreciated, throws warning
     )
     return values
-
-
 
 def get_values_at_centroids(f):
     """
@@ -217,9 +213,6 @@ def get_values_at_centroids(f):
             )
     return values
 
-
-
-
 @PETSc.Log.EventDecorator("Extract tensor at centroids")
 def get_tensor_at_centroids(f):
     """
@@ -253,7 +246,7 @@ def get_tensor_at_centroids(f):
     P0_ten = fd.TensorFunctionSpace(mesh, "DG", 0)
     i = 0
 
-    func=funcs # ej321 - temp
+    func=funcs # temp
     # if (funcs.len>1):
     #     for func in funcs:
     #         values.dat.data[:, i] = fd.project(func, P0).dat.data_ro
@@ -267,7 +260,7 @@ def get_tensor_at_centroids(f):
     #         if p == 1:
     #             continue
     #         H = fd.project(ufl.grad(ufl.grad(func)), P0_ten)
-    func_len = func.dat.data_ro[:, 0, 0].shape[0] #ej321 - added to fit shape, HACKY
+    func_len = func.dat.data_ro[:, 0, 0].shape[0] # added to fit shape, HACKY
     values.dat.data[:func_len, i] = func.dat.data_ro[:, 0, 0]
     values.dat.data[:func_len, i + 1] = 0.5 * (
         func.dat.data_ro[:, 0, 1] + func.dat.data_ro[:, 1, 0]
@@ -279,8 +272,6 @@ def get_tensor_at_centroids(f):
     #         "Polynomial degrees greater than 2 not yet considered"
     #     )
     return values.dat.data
-
-
 
 def extract_array(f, mesh=None, centroid=False, project=False):
     r"""
@@ -319,8 +310,6 @@ def extract_array(f, mesh=None, centroid=False, project=False):
         # print(f'extract array len <>1')
         return np.hstack([get(si).dat.data for si in s])
     
-
-
 def get_mesh_info(fwd_sol):
     
     mesh = fwd_sol.function_space().mesh()
@@ -351,7 +340,7 @@ def get_mesh_info(fwd_sol):
                     d = mesh.topology_dm.getCone(c)
                     connect.append((d[0],d[1]))
                 connect = list(set(connect))
-        # cell.append([face,vertices,edges,cell_con,connect])
+  
         _element["element_vertices"] = vertices
         _element["vertices_links"] = connect
         
@@ -361,14 +350,10 @@ def get_mesh_info(fwd_sol):
         centr=(np.mean([x for x,y in lcoords]),np.mean([y for x,y in lcoords]))
         _element["element_centroid_xy"]= centr    
         _element["element_vertices_xy"]= lcoords
-        # a.insert(3,centr)
 
         cellinfo[i]=_element
-    # perm= vertex_permutation(fwd_sol,mesh)    
-    # for a in cellinfo:
 
     return cellinfo
-
 
 def coarse_dwr_indicator(mesh_seq, fwd_sol,adj_sol, index=0):
     r"""
@@ -380,50 +365,28 @@ def coarse_dwr_indicator(mesh_seq, fwd_sol,adj_sol, index=0):
     :arg q_star: the adjoint solution in enriched space
     """
     mesh = fwd_sol.function_space().mesh()
-    # mesh_plus = q.function_space().mesh()
 
     # Extract indicator in enriched space
-#     solver_obj = config.Solver(mesh_plus, q)
     field=mesh_seq.params["field"]
-    # print(f' in coarse_dwr_indicator, field = {field}')
-#     index=0
-    
-    # Get forms for each equation 
-    # TODO: issue with time dependent F
-    # ej321 adding hack for time dependent form:
-    # print("/n/n HERE")
-    # # F = None
-    # try:
-    #     print("/n/n HERE2")
-    #     t_=fd.Constant(1.0) # ej321
-    #     # print(f'index{index}')
-    #     F = mesh_seq.form(index,{field:(fwd_sol,fwd_sol)},t_)[field] #only need first solution, second just a placeholder?
-    # except:
-    #     print("/n/n HERE3")
-    #     F = mesh_seq.form(index,{field:(fwd_sol,fwd_sol)})[field] #only need first solution, second just a placeholder?
-    # print(f"F: {F}")
-    # F = mesh_seq.form(index,{field:(fwd_sol,fwd_sol)})[field] #only need first solution, second just a placeholder?
-    F = mesh_seq.form(index)
-    # print(f"F: {F}")
-#     V = mesh_seq.function_spaces[field][index]
-    V=fwd_sol.function_space()
-    print(f'V: {fwd_sol.function_space()}')
-    print(f'adjoint : {adj_sol}')
 
+    F = mesh_seq.form(index)[field]
+    V=fwd_sol.function_space()
+
+    # QC: 
+    # print(f'V: {fwd_sol.function_space()}')
+    # print(f'adjoint : {adj_sol}')
     dwr_star = get_dwr_indicator(F, adj_sol, test_space=V)
-    print(f"here, dwr star {dwr_star}")
+
     # Project down to base space
     P0 = fd.FunctionSpace(mesh, "DG", 0)
     dwr_coarse = fd.project(dwr_star, P0)
     dwr_coarse.interpolate(abs(dwr_coarse))
     return dwr_coarse
 
-
 def extract_mesh_features(fwd_sol):
     
     # https://fenics.readthedocs.io/projects/ufl/en/latest/manual/form_language.html
     mesh = fwd_sol.function_space().mesh()
-
 
     # Features describing the mesh element
     with PETSc.Log.Event("Analyse element"):
@@ -436,7 +399,8 @@ def extract_mesh_features(fwd_sol):
         d, h1, h2 = (extract_array(p) for p in extract_components(JTJ))
 
         # Is the element on the boundary?
-        P0 = fd.FunctionSpace(mesh, "DG", 0) #ej321 trying this as alter to passing dwr_coarse
+        # TODO: trying this as alter to passing dwr_coarse
+        P0 = fd.FunctionSpace(mesh, "DG", 0)
         # p0test = fd.TestFunction(dwr_coarse.function_space())
         p0test = fd.TestFunction(P0)
         bnd = fd.assemble(p0test * ufl.ds).dat.data
@@ -445,114 +409,9 @@ def extract_mesh_features(fwd_sol):
         return d, h1, h2, bnd
 
 def extract_coarse_dwr_features(mesh_seq, fwd_sol, adj_sol, index=0):
-    print(f"in extract_coarse_dwr_features") #ej321
+    print(f'\n\n\nHERE')
     dwr_coarse = coarse_dwr_indicator(mesh_seq, fwd_sol, adj_sol, index)
-    print(f'after calc dwr coarse before return') # ej321
     return extract_array(dwr_coarse)
-
-def _extract_mesh_features(mesh_seq, fwd_sol, adj_sol, hessian, index=0):
-    """
-    Extract features from the outputs of a run.
-
-    :arg config: the configuration file
-    :arg fwd_sol: the forward solution
-    :arg adj_sol: the adjoint solution
-    :return: a list of feature arrays
-    """
-
-    d, h1, h2, bnd = extract_mesh_features(fwd_sol)
-
-    features = {
-        "mesh_d": d,
-        "mesh_h1": h1,
-        "mesh_h2": h2,
-        "mesh_bnd": bnd,
-        "cell_info": get_mesh_info(fwd_sol), # ej321 added
-    }
-
-    features["forward_dofs"]: extract_array(fwd_sol, centroid=True)
-
-    if adj_sol:
-        features["adjoint_dofs"]: extract_array(adj_sol, centroid=True)
-        features["estimator_coarse"]: extract_coarse_dwr_features(mesh_seq, fwd_sol, adj_sol, index=0)
-
-    if hessian: 
-        features["hessian_dofs"]: get_tensor_at_centroids(hessian) # ej321 not working, 12 dof intead of 3?
-
-
-def _extract_features(mesh_seq, fwd_sol, adj_sol, hessian, index=0): # ej321 - added hessian
-    """
-    Extract features from the outputs of a run.
-
-    :arg config: the configuration file
-    :arg fwd_sol: the forward solution
-    :arg adj_sol: the adjoint solution
-    :return: a list of feature arrays
-    """
-    mesh = fwd_sol.function_space().mesh()
-
-   
-    # Features describing the mesh element
-    with PETSc.Log.Event("Analyse element"):
-        P0_ten = fd.TensorFunctionSpace(mesh, "DG", 0) # for steady state???
-#         P0_ten = fd.TensorFunctionSpace(mesh, "CG", 1)
-        # Element size, orientation and shape
-        J = ufl.Jacobian(mesh)
-        JTJ = fd.assemble(interpolate(fd.dot(fd.transpose(J), J), P0_ten))
-        d, h1, h2 = (extract_array(p) for p in extract_components(JTJ))
-
-        # Is the element on the boundary?
-        P0 = fd.FunctionSpace(mesh, "DG", 0) #ej321 trying this as alter to passing dwr_coarse
-        # p0test = fd.TestFunction(dwr_coarse.function_space())
-        p0test = fd.TestFunction(P0)
-        bnd = fd.assemble(p0test * ufl.ds).dat.data
-
-    if adj_sol:
-        # Coarse-grained DWR estimator
-        # with PETSc.Log.Event("Extract estimator"):
-        dwr_coarse = coarse_dwr_indicator(mesh_seq, fwd_sol, adj_sol, index)
-
-
-        # Combine the features together
-        features = {
-            "estimator_coarse": extract_array(dwr_coarse),
-            # "physics_drag": extract_array(config.parameters.drag(mesh)),
-            # "physics_viscosity": extract_array(config.parameters.viscosity(mesh), project=True),
-            # "physics_bathymetry": extract_array(config.parameters.bathymetry(mesh), project=True),
-            "mesh_d": d,
-            "mesh_h1": h1,
-            "mesh_h2": h2,
-            "mesh_bnd": bnd,
-            "forward_dofs": extract_array(fwd_sol, centroid=True),
-            "adjoint_dofs": extract_array(adj_sol, centroid=True),
-            "hessian_dofs": get_tensor_at_centroids(hessian), # ej321 not working, 12 dof intead of 3?
-            "cell_info": get_mesh_info(fwd_sol), # ej321 added
-        }
-    
-    else:
-        
-                # Combine the features together
-        features = {
-            # "estimator_coarse": extract_array(dwr_coarse),
-            # "physics_drag": extract_array(config.parameters.drag(mesh)),
-            # "physics_viscosity": extract_array(config.parameters.viscosity(mesh), project=True),
-            # "physics_bathymetry": extract_array(config.parameters.bathymetry(mesh), project=True),
-            "mesh_d": d,
-            "mesh_h1": h1,
-            "mesh_h2": h2,
-            "mesh_bnd": bnd,
-            "forward_dofs": extract_array(fwd_sol, centroid=True),
-            "adjoint_dofs": extract_array(adj_sol, centroid=True),
-            "hessian_dofs": get_tensor_at_centroids(hessian), # ej321 not working, 12 dof intead of 3?
-            "cell_info": get_mesh_info(fwd_sol), # ej321 added
-        }
-
-    # for key, value in features.items():
-        # assert not np.isnan(value).any()
-    # siyi = [[value[v] for _,value in features.items()] for v in range(mesh.num_cells())]
-    # print(siyi[0])
-    # breakpoint() # ej321
-    return features
 
 
 def proc_data_item(data_item, include_global_attrs=True, use_pos=True, no_adjoint=False,
@@ -662,13 +521,17 @@ def gnn_indicator_fit(features, mesh):
     # QC features reformated for gnn
     # print(f'node size {node_attrs.shape}, edge size {edge_index.shape}')
 
+    # QC current folder:
+    print(f'current director for graph models root path: {os.getcwd()}')
+
     # set root location for the saved model
-    rootpath = r'/data0/gnn_refine/'
+    # TODO: make this not hardcoded or move 
+    localpath = '/home/phd01/nn_adapt'
         
     # load model from pytorch
-    gnn_model = torch.jit.load(f"{rootpath}/trained_models/graphsage_5e-5_dwr_cap2.5.pt")
-    normalise_func = torch.jit.load(f"{rootpath}/trained_models/normalise_attrs_2196.pt")
-    denormalise_func = torch.jit.load(f"{rootpath}/trained_models/denormalise_targets_2196.pt")
+    gnn_model = torch.jit.load(f"{localpath}/trained_models/graphsage_5e-5_dwr_cap2.5.pt")
+    normalise_func = torch.jit.load(f"{localpath}/trained_models/normalise_attrs_2196.pt")
+    denormalise_func = torch.jit.load(f"{localpath}/trained_models/denormalise_targets_2196.pt")
     
     # QC function imports working
     # print(f'in the gnn indictor fit {gnn_model}')
@@ -698,12 +561,13 @@ def gnn_noadj_indicator_fit(features, mesh):
     # print(f'node size {node_attrs.shape}, edge size {edge_index.shape}')
 
     # set root location for the saved model
-    rootpath = r'/data0/gnn_refine/'
+    # TODO: make this not hardcoded or move 
+    localpath = '/home/phd01/nn_adapt'
         
     # load model from pytorch
-    gnn_noadj_model = torch.jit.load(f"{rootpath}/trained_models/graphsage_noadj.pt")
-    normalise_func = torch.jit.load(f"{rootpath}/trained_models/normalise_attrs_2196_noadj.pt")
-    denormalise_func = torch.jit.load(f"{rootpath}/trained_models/denormalise_targets_2196_noadj.pt")
+    gnn_noadj_model = torch.jit.load(f"{localpath}/trained_models/graphsage_noadj.pt")
+    normalise_func = torch.jit.load(f"{localpath}/trained_models/normalise_attrs_2196_noadj.pt")
+    denormalise_func = torch.jit.load(f"{localpath}/trained_models/denormalise_targets_2196_noadj.pt")
     
     # QC function imports working
     # print(f'in the gnn indictor fit {gnn_model}')
@@ -733,12 +597,13 @@ def mlp_indicator_fit(features, mesh):
     # print(f'node size {node_attrs.shape}, edge size {edge_index.shape}')
 
     # set root location for the saved model
-    rootpath = r'/data0/gnn_refine/'
+    # TODO: make this not hardcoded or move 
+    localpath = '/home/phd01/nn_adapt'
         
     # load model from pytorch
-    mlp_model = torch.jit.load(f"{rootpath}/trained_models/mlp.pt")
-    normalise_func = torch.jit.load(f"{rootpath}/trained_models/normalise_attrs_2196.pt") # TODO: Check with Siyi 
-    denormalise_func = torch.jit.load(f"{rootpath}/trained_models/denormalise_targets_2196.pt") # TODO: Check with Siyi 
+    mlp_model = torch.jit.load(f"{localpath}/trained_models/mlp.pt")
+    normalise_func = torch.jit.load(f"{localpath}/trained_models/normalise_attrs_2196.pt") # TODO: Check with Siyi 
+    denormalise_func = torch.jit.load(f"{localpath}/trained_models/denormalise_targets_2196.pt") # TODO: Check with Siyi 
     
     # QC function imports working
     # print(f'in the gnn indictor fit {gnn_model}')
@@ -767,12 +632,13 @@ def joe_indicator_fit(features, mesh):
     # print(f'node size {node_attrs.shape}, edge size {edge_index.shape}')
 
     # set root location for the saved model
-    rootpath = r'/data0/gnn_refine/'
+    # TODO: make this not hardcoded or move 
+    localpath = '/home/phd01/nn_adapt'
         
     # load model from pytorch
-    mlp_model = torch.jit.load(f"{rootpath}/trained_models/mlp.pt")
-    normalise_func = torch.jit.load(f"{rootpath}/trained_models/normalise_attrs_2196.pt") # TODO: Check with Siyi 
-    denormalise_func = torch.jit.load(f"{rootpath}/trained_models/denormalise_targets_2196.pt") # TODO: Check with Siyi 
+    mlp_model = torch.jit.load(f"{localpath}/trained_models/mlp.pt")
+    normalise_func = torch.jit.load(f"{localpath}/trained_models/normalise_attrs_2196.pt") # TODO: Check with Siyi 
+    denormalise_func = torch.jit.load(f"{localpath}/trained_models/denormalise_targets_2196.pt") # TODO: Check with Siyi 
     
     # QC function imports working
     # print(f'in the gnn indictor fit {gnn_model}')

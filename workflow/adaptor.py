@@ -455,7 +455,7 @@ class Adaptor:
 
             # QC:
             print(f'\t exporting features: features output to {output_file}')
-            
+
             return features
 
     def output_vtk_for(self, mesh_seq, field = None, ):
@@ -1017,8 +1017,9 @@ class Adaptor:
             
                 # Recover the Hessian of the current solution
                 hessians = [*get_hessians(sol, metric_parameters=mp)] # ej321
-                hessian = hessians[0] # ej321 - set the first hessian to the base
-                hessian.average(*hessians[1:]) # ej321 - all the other hessians
+                # set the first hessian to the base and average remaining
+                hessian = hessians[0]
+                hessian.average(*hessians[1:])
                 hessian.set_parameters(mp)
             
                 # TODO: check if this is necesary  as steps not in original nn_adapt workflow
@@ -1319,7 +1320,7 @@ class Adaptor:
         duration = -perf_counter()
 
         # Ramp the target average metric complexity per timestep
-        base =mesh_seq.params["base"]
+        base = mesh_seq.params["base"]
         target = mesh_seq.params["target"]
         
         # ramp non-linear
@@ -1439,27 +1440,31 @@ class Adaptor:
             if not mesh_seq.converged[i]:
 
                 mesh_seq.meshes[i] = ani.adapt(mesh_seq.meshes[i], metric, name=f'mesh_{i}_{iteration+1}')
+                # QC:
+                # print(f'\t adaptor - unsteady isotropic, new mesh after adaptation: {mesh_seq.meshes[i].name}')
                 
                 #QC - for fixed mesh segments
-                print(f"face labels after adapt : {mesh_seq.meshes[i].topology_dm.getLabelIdIS(dmcommon.FACE_SETS_LABEL).indices}")
+                # print(f"\t adaptor - unsteady isotropic,face labels after adapt :\
+                # {mesh_seq.meshes[i].topology_dm.getLabelIdIS(dmcommon.FACE_SETS_LABEL).indices}")
 
                 self.unset_fixed_boundary(mesh_seq.meshes[i])
                 self.unset_fixed_area(mesh_seq.meshes[i])
 
                 # QC - for fixed mesh segments
-                print(f"face labels after adapt uset : {mesh_seq.meshes[i].topology_dm.getLabelIdIS(dmcommon.FACE_SETS_LABEL).indices}")
+                # print(f"\t adaptor - unsteady isotropic,face labels after adapt unset :\
+                # {mesh_seq.meshes[i].topology_dm.getLabelIdIS(dmcommon.FACE_SETS_LABEL).indices}")
 
             else:
-                # Stats post adaptation - final??
-                print("FINAL MESH STATS OUT")
-                # self.solutions.append(solutions)
-                # self.indicators.append(indicators)
+                # TODO: is output stats post adaptation necessary
                 self.mesh_stats.append(self.dict_mesh_stats()) 
                 self.qois.append(
                     fd.assemble(
                         mesh_seq.calc_qoi(-1,solutions)
                         )
                     )
+                # QC:
+                print("\t adaptor - unsteady isotropic: final mesh stats exported")
+                print(f"\n\t final mesh stats: {self.mesh_stats[-1]}")
 
         # timer end
         duration += perf_counter()

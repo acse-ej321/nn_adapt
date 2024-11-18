@@ -1,40 +1,32 @@
 import firedrake as fd
-# from firedrake.__future__ import interpolate
 import animate as ani 
 import goalie as gol 
 import goalie_adjoint as gol_adj
 from animate.utility import VTKFile
 import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
-from matplotlib import ticker
-
-# import pt_discharge_features as features
 
 import numpy as np
 import pickle # ej321
 
 import os as os
-from pathlib import Path
-from collections.abc import Callable
 
-import pdb #ej321
 
-import importlib
 from time import perf_counter
 from matplotlib.pyplot import cm
 
-from pyadjoint import stop_annotating
-
 # timing functions manually:
 import logging
-from time import perf_counter
 
-from firedrake.pyplot import * # ej321 - talk about namespace issue...
-
+# import firedrake.pyplot as fdplt
 import firedrake.cython.dmcommon as dmcommon
 
 # from workflow.utility import *
-from workflow.features import *
+from workflow.features import extract_mesh_features, get_mesh_info, extract_array, get_hessians
+from workflow.features import extract_coarse_dwr_features
+from workflow.features import gnn_indicator_fit, gnn_noadj_indicator_fit, mlp_indicator_fit
+
+
+from collections import defaultdict
 
 class Adaptor:
 
@@ -70,7 +62,7 @@ class Adaptor:
         # QC:
         print(f'current working directory changed to: {self.local_filepath}')
         
-    def update_method(method = None):
+    def update_method(self, method = None):
         if method is not None:
             self.method = method
 
@@ -113,9 +105,6 @@ class Adaptor:
                         # save new label association with original
                         self.area_labels[label_id].append(_index)
                         _index+=1
-
-                    else:
-                        pass
                 
                 # QC:
                 # print(f"face labels after fix : {mesh.topology_dm.getLabelIdIS(dmcommon.CELL_SETS_LABEL).indices}")
@@ -190,9 +179,6 @@ class Adaptor:
                         # save new label association with original
                         self.boundary_labels[label_id].append(_index)
                         _index+=1
-
-                    else:
-                        pass
                 
                 # QC:
                 # print(f"face labels after fix : {mesh.topology_dm.getLabelIdIS(dmcommon.FACE_SETS_LABEL).indices}")
@@ -229,25 +215,24 @@ class Adaptor:
             # print(f"{dropped} dropped by MMG")
 
     def dict_mesh_stats(self):
-        def_dict = {}
+        """
+        Computes and returns a dictionary containing statistics for each mesh in the sequence.
+
+        This method iterates over a sequence of mesh objects and collects statistics including
+        the number of elements and vertices, as well as the mean, minimum, and maximum values 
+        for each quality metric.
+
+        :returns: summary mesh statictics in a dictionary
+
+        """
+        def_dict = defaultdict(list)
         for m in self.mesh_seq:
-            try:
-                def_dict['elements'].append(m.num_cells())
-                def_dict['vertices'].append(m.num_vertices())
-            except:
-                def_dict['elements']=[m.num_cells()]
-                def_dict['vertices']=[m.num_vertices()]
+            def_dict['elements'].append(m.num_cells())
+            def_dict['vertices'].append(m.num_vertices())
             for n in ani.quality.QualityMeasure(m)._measures:
-                try:
-                    measure=ani.quality.QualityMeasure(m)(str(n)).vector().gather()
-                    try:
-                        def_dict[str(n)].append([measure.mean(),measure.min(),measure.max()])
-                    except:
-                        def_dict[str(n)]=[[measure.mean(),measure.min(),measure.max()]]
-                except:
-                    # TO QC:
-                    # print(f'error for {str(n)}')
-                    pass             
+                measure=ani.quality.QualityMeasure(m)(str(n)).vector().gather()
+                def_dict[str(n)].append([measure.mean(),measure.min(),measure.max()])
+            
         return def_dict
 
 
@@ -283,7 +268,7 @@ class Adaptor:
                 # get the x coordinate - the iteration number
                 x.append(index)
                 # for each mesh in the mesh sequence             
-                for i in range(len(self.mesh_seq.meshes)): # i is mesh number
+                for i in range(nmesh): # i is mesh number
                     # if the area is a list of values - like vertices or elements
                     if (isinstance(def_dict[key][0], int)):
                         # for the first iteration, build the lists
@@ -309,7 +294,7 @@ class Adaptor:
                             y_max[i].append(def_dict[key][i][2])
 
             # create a color spectrum to iterate through
-            color = iter(cm.gist_rainbow(np.linspace(0, 1, len(self.mesh_seq.meshes))))
+            color = iter(cm.gist_rainbow(np.linspace(0, 1, nmesh)))
             # for each y grouping per mesh, plot the values
             for ny_,y_ in enumerate(y):
                 c = next(color)
@@ -361,32 +346,25 @@ class Adaptor:
             fwd_sol = self.mesh_seq.solutions[field]['forward'][_m][0]
 
             # extract some derivative parameters from the mesh associated with the forward solution
-            try:
-                d, h1, h2, bnd = extract_mesh_features(fwd_sol)
-                # QC:
-                print(f'\t exporting features: extracting derivative features')
+            d, h1, h2, bnd = extract_mesh_features(fwd_sol)
+            # QC:
+            print('\t exporting features: extracting derivative features')
 
-                features = {
-                    "mesh_d": d,
-                    "mesh_h1": h1,
-                    "mesh_h2": h2,
-                    "mesh_bnd": bnd,
-                    "cell_info": get_mesh_info(fwd_sol), # ej321 added
-                }
-                # QC:
-                print(f'\t exporting features: exporting derivative and cell info features')
-            except:
-                features = {}
-                # QC:
-                print(f'\t exporting features: issue with exporting derivative and cell info features')
+            features = {
+                "mesh_d": d,
+                "mesh_h1": h1,
+                "mesh_h2": h2,
+                "mesh_bnd": bnd,
+                "cell_info": get_mesh_info(fwd_sol), # ej321 added
+            }
+            # QC:
+            print('\t exporting features: exporting derivative and cell info features')
 
-            try:
-                for _key,_value in self.mesh_seq.model_features.items():
-                    # QC:
-                    print(f'\t exporting features: in feature output: {_key,_value}')
-                    features[_key] = _value
-            except:
-                print("Issue with accessing model features on Model object - did you mean to define?")
+            for _key,_value in self.mesh_seq.model_features.items():
+                # QC:
+                print(f'\t exporting features: in feature output: {_key,_value}')
+                features[_key] = _value
+                #  if not print("Issue with accessing model features on Model object - did you mean to define?")
 
             # forward solutions degrees of freedom for each time step
             features["forward_dofs"]={}
@@ -402,15 +380,12 @@ class Adaptor:
             # adjoint solution
             # if adjoint run - extract adjoint and estimator
             if 'adjoint' in self.mesh_seq.solutions[field]:
-                try:
-                    adj_sol = self.mesh_seq.solutions[field]['adjoint'][_m][0]
-                    print(f'\t exporting features: get adjoint solution')
-                    features["adjoint_dofs"] = extract_array(adj_sol, centroid=True)
-                    print(f'\t exporting features: extract adjoint dof')
-                    features["estimator_coarse"] = extract_coarse_dwr_features(self.mesh_seq, fwd_sol, adj_sol, index=0)
-                    print(f'\t exporting features: extract coarse dwr estimator')
-                except:
-                    print(f'\t exporting features: issue with extracting adjoint')
+                adj_sol = self.mesh_seq.solutions[field]['adjoint'][_m][0]
+                print('\t exporting features: get adjoint solution')
+                features["adjoint_dofs"] = extract_array(adj_sol, centroid=True)
+                print('\t exporting features: extract adjoint dof')
+                features["estimator_coarse"] = extract_coarse_dwr_features(self.mesh_seq, fwd_sol, adj_sol, index=0)
+                print('\t exporting features: extract coarse dwr estimator')
 
             # add mesh stats into the general stats dictionary
             _mesh_stats = self.dict_mesh_stats() 
@@ -418,14 +393,14 @@ class Adaptor:
                 gen_stats[_key]=_value[_m]
 
             # if the indicator exists
-            if not all([a==None for a in self.mesh_seq.indicators.extract(layout="field")[field]]):
+            if not all([a is None for a in self.mesh_seq.indicators.extract(layout="field")[field]]):
                 indi = self.mesh_seq.indicators[field][0][0]
                 features["estimator"] = indi.dat.data.flatten()
-                print(f'\t exporting features: extracting estimator from indicator')
+                print('\t exporting features: extracting estimator from indicator')
             
             # if metrics were captured
             if self.metrics is not None:
-                print(f'\t exporting features: extracting metrics - NOT IMPLIMENTED YET')
+                print('\t exporting features: extracting metrics - NOT IMPLIMENTED YET')
                 # met = self.metrics[0][_a]
                 # features["metric_dofs"] = get_tensor_at_centroids(met) # ej321 not working, 12 dof intead of 3?
 
@@ -500,7 +475,7 @@ class Adaptor:
                 self.m_out= VTKFile(f"{vtk_folder}/metric.pvd")
 
             for _met in self.metrics:
-                _met.rename(f'metric')
+                _met.rename('metric')
                 self.m_out.write(*_met.subfunctions)
                 
                 # QC:
@@ -519,7 +494,7 @@ class Adaptor:
             if self.h_out is None:
                 self.h_out= VTKFile(f"{vtk_folder}/hessian.pvd")
             for _hes in self.hessians:
-                _hes.rename(f'hessian')
+                _hes.rename('hessian')
                 self.h_out.write(*_hes.subfunctions)
 
 
@@ -622,7 +597,7 @@ class Adaptor:
 
                     for _t in range(np.shape(
                         mesh_seq.solutions.extract(layout='subinterval')[_m][field]['forward'])[0]):
-                        it_sol = _t * mesh_seq.time_partition.num_timesteps_per_export[0] * mesh_seq.time_partition.timesteps[0]
+                        # it_sol = _t * mesh_seq.time_partition.num_timesteps_per_export[0] * mesh_seq.time_partition.timesteps[0]
 
                         # QC:
                         # print(mesh_seq.solutions.extract(layout='subinterval')[_m][field]['forward'][_t].name())
@@ -634,9 +609,9 @@ class Adaptor:
 
                 # save adjoint - 
                 # TODO: is saving the adjoint needed
-                if mesh_seq.steady == False: # is this the correct filter?
+                if not mesh_seq.steady: # is this the correct filter?
                     # QC:
-                    print(f"\t checkpoint - saving: adjoint")
+                    print("\t checkpoint - saving: adjoint")
 
                     afile.save_function(
                         mesh_seq.solutions.extract(layout='subinterval')[_m][field]['adjoint'][0]
@@ -645,7 +620,7 @@ class Adaptor:
                 # save indicators
                 if mesh_seq.indicators is not None:
                     # QC:
-                    print(f"\t checkpoint - saving: indicators")
+                    print("\t checkpoint - saving: indicators")
                     afile.save_function(
                         mesh_seq.indicators.extract(layout='subinterval')[_m][field][0]
                         )
@@ -657,7 +632,7 @@ class Adaptor:
 
         # output vtks
         self.output_vtk_for(mesh_seq)
-        if method not in ["uniform", "steady_hessian", "time_hessian"] and mesh_seq.steady == False:
+        if method not in ["uniform", "steady_hessian", "time_hessian"] and not mesh_seq.steady:
             self.output_vtk_adj(mesh_seq)
 
         # output checkpoint
@@ -677,7 +652,7 @@ class Adaptor:
         features = self.adapt_outputs(mesh_seq, method)
 
         # QC:
-        print(f'\t adaptor - export initial features, vtk and checkpoint')
+        print('\t adaptor - export initial features, vtk and checkpoint')
 
 
         # ML Surrogate for Indicators
@@ -872,7 +847,7 @@ class Adaptor:
 
             # constrain metric
             # QC: 
-            print(f"\t adaptor - steady hessian: applying metric constraints")
+            print("\t adaptor - steady hessian: applying metric constraints")
 
             gol_adj.enforce_variable_constraints(_hessians, 
                 h_min = mesh_seq.params["h_min"],
@@ -1033,7 +1008,7 @@ class Adaptor:
 
             # constrain metric
             # QC: 
-            print(f"\t adaptor - unsteady hessian: applying metric constraints")
+            print("\t adaptor - unsteady hessian: applying metric constraints")
             gol_adj.enforce_variable_constraints(_hessians, 
                 h_min = mesh_seq.params["h_min"],
                 h_max= mesh_seq.params["h_max"],
@@ -1197,7 +1172,7 @@ class Adaptor:
 
                 # get local indicator 
                 indi = indicators.extract(layout="field")[field][i][j] #update indicators
-                estimator = indi.vector().gather().sum()
+                # estimator = indi.vector().gather().sum()
                                     
                 # local instance of Riemanian metric
                 _metric = ani.metric.RiemannianMetric(P1_ten)
@@ -1215,7 +1190,7 @@ class Adaptor:
 
             # constrain metric
             # QC: 
-            print(f"\t adaptor - steady isotropic: applying metric constraints")
+            print("\t adaptor - steady isotropic: applying metric constraints")
             gol_adj.enforce_variable_constraints(_metrics, 
                 h_min = mesh_seq.params["h_min"],
                 h_max= mesh_seq.params["h_max"],
@@ -1373,7 +1348,7 @@ class Adaptor:
                 
                 # get local indicator 
                 indi = indicators.extract(layout="field")[field][i][j] #update indicators
-                estimator = indi.vector().gather().sum()
+                # estimator = indi.vector().gather().sum()
                                     
                 # local instance of Riemanian metric
                 _metric = ani.metric.RiemannianMetric(P1_ten)
@@ -1391,7 +1366,7 @@ class Adaptor:
             
             # constrain metric
             # QC: 
-            print(f"\t adaptor - unsteady isotropic: applying metric constraints")
+            print("\t adaptor - unsteady isotropic: applying metric constraints")
             gol_adj.enforce_variable_constraints(_metrics, 
                 h_min = mesh_seq.params["h_min"],
                 h_max= mesh_seq.params["h_max"],
@@ -1571,7 +1546,7 @@ class Adaptor:
                 
                 # get local indicator 
                 indi = indicators[field][i][j]
-                estimator = indi.vector().gather().sum()
+                # estimator = indi.vector().gather().sum()
 
                 # Recover the Hessian of the current solution
                 hes_duration = -perf_counter()
@@ -1606,7 +1581,7 @@ class Adaptor:
 
             #constrain metric
             # QC: 
-            print(f"\t adaptor - steady anisotropic: applying metric constraints")
+            print("\t adaptor - steady anisotropic: applying metric constraints")
             gol_adj.enforce_variable_constraints(_metrics, 
                 h_min = mesh_seq.params["h_min"],
                 h_max= mesh_seq.params["h_max"],
@@ -1753,7 +1728,7 @@ class Adaptor:
             _hessians=[]
 
             # QC:
-            print(f'\t adaptor - unsteady anisotropic, set fixed boundary/area')
+            print('\t adaptor - unsteady anisotropic, set fixed boundary/area')
             self.set_fixed_boundary(mesh_seq.meshes[i])
             self.set_fixed_area(mesh_seq.meshes[i])
 
@@ -1770,7 +1745,7 @@ class Adaptor:
                 
                 # get local indicator 
                 indi = indicators[field][i][j]
-                estimator = indi.vector().gather().sum()
+                # estimator = indi.vector().gather().sum()
 
                 # Recover the Hessian of the current solution
                 hessians = [*get_hessians(sol, metric_parameters=mp)]
@@ -1800,7 +1775,7 @@ class Adaptor:
             
             #constrain metric
             # QC: 
-            print(f"\t adaptor - unsteady anisotropic: applying metric constraints")
+            print("\t adaptor - unsteady anisotropic: applying metric constraints")
             gol_adj.enforce_variable_constraints(_metrics, 
                 h_min = mesh_seq.params["h_min"],
                 h_max= mesh_seq.params["h_max"],
@@ -1856,7 +1831,7 @@ class Adaptor:
                 # print(f'\t adaptor - unsteady anisotropic, new mesh after adaptation: {mesh_seq.meshes[i].name}')
                 
                 # QC:
-                print(f'\t adaptor - unsteady anisotropic: unseting fixed boundary/areas')
+                print('\t adaptor - unsteady anisotropic: unseting fixed boundary/areas')
                 # print(f"\t\t face labels after adapt : {mesh_seq.meshes[i].topology_dm.getLabelIdIS(dmcommon.FACE_SETS_LABEL).indices}")
 
                 self.unset_fixed_boundary(mesh_seq.meshes[i])

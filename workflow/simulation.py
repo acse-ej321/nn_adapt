@@ -38,18 +38,16 @@ def create_folder(rootfolder, folderkey, filepath):
         folder_name (string - directory)
     """
     foldername = str(folderkey) + datetime.now().strftime('%d_%m_%Y')
-    try:
-        if os.path.isdir(filepath):
-            print(f'simulation using folder: {filepath}')
-            return filepath
-            
-    except:
 
+    if os.path.isdir(filepath):
+        print(f'simulation using folder: {filepath}')
+        return filepath
+            
+    else:
         filepath = rootfolder
 
         if not os.path.isdir(os.path.join(filepath,foldername)):
             # TODO: add MPI for running on HPC?
-
             os.makedirs(os.path.join(filepath,foldername)) 
             filepath = os.path.join(filepath,foldername)
             print(f'simulation folder created: {filepath}') 

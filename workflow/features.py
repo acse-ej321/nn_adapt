@@ -12,6 +12,12 @@ import pickle
 import torch # for ML implimentation #TODO: move this somewhere else?
 import os # temp
 
+__all__ = ["split_into_scalars", "get_hessians", "extract_components", 
+"get_values_at_elements", "get_values_at_centroids", "get_tensor_at_centroids",
+"extract_array", "get_mesh_info", "coarse_dwr_indicator", "extract_mesh_features",
+"extract_coarse_dwr_features","proc_data_item",
+"gnn_indicator_fit", "gnn_noadj_indicator_fit", "mlp_indicator_fit", "joe_indicator_fit"]
+
 def split_into_scalars(f):
     """
     Given a :class:`Function`, split it into

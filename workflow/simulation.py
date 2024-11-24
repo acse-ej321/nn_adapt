@@ -38,12 +38,8 @@ def create_folder(rootfolder, folderkey, filepath):
         folder_name (string - directory)
     """
     foldername = str(folderkey) + datetime.now().strftime('%d_%m_%Y')
-
-    if os.path.isdir(filepath):
-        print(f'simulation using folder: {filepath}')
-        return filepath
             
-    else:
+    if filepath is None:
         filepath = rootfolder
 
         if not os.path.isdir(os.path.join(filepath,foldername)):
@@ -56,7 +52,10 @@ def create_folder(rootfolder, folderkey, filepath):
             filepath = os.path.join(filepath,foldername)
             print(f'simulation using folder: {filepath}')
             return filepath
-
+        
+    if os.path.isdir(filepath):
+        print(f'simulation using folder: {filepath}')
+        return filepath
 class Simulation():
     
     def __init__(self, Model, rootfolder=None, filepath=None, parameters={}):
@@ -132,11 +131,19 @@ class Simulation():
 
         # if ML method need which needs adjoint
         elif  self.params["indicator_method"] in ["gnn","mlp","gnn_noadj",]:
+            print('Adjoint solver')
             gol_adj.AdjointMeshSeq.fixed_point_iteration( 
                 self.mesh_seq, 
                 self.adaptor.adaptor,
                 parameters = self.params 
             )
+
+            # alternative:
+            # self.mesh_seq.__class__.mro()[2].fixed_point_iteration( 
+            #         self.mesh_seq, 
+            #         self.adaptor.adaptor,
+            #         parameters = self.params 
+            # )
 
         else:
             self.mesh_seq.fixed_point_iteration( 

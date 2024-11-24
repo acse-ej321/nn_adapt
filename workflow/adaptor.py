@@ -28,6 +28,7 @@ from workflow.features import gnn_indicator_fit, gnn_noadj_indicator_fit, mlp_in
 
 from collections import defaultdict
 
+
 class Adaptor:
 
     def __init__(self, mesh_seq, parameters, filepath= None, *kwargs):
@@ -225,13 +226,29 @@ class Adaptor:
         :returns: summary mesh statictics in a dictionary
 
         """
+        
         def_dict = defaultdict(list)
         for m in self.mesh_seq:
             def_dict['elements'].append(m.num_cells())
             def_dict['vertices'].append(m.num_vertices())
-            for n in ani.quality.QualityMeasure(m)._measures:
+
+            # added explicitly as cxx seemed to not be filtering 3d facets out of 2d
+            qmeasures = (
+                "min_angle",
+                "area",
+                # "volume",
+                # "facet_area",
+                "aspect_ratio",
+                "eskew",
+                "skewness",
+                "scaled_jacobian",
+                # "metric",
+            )
+            
+            for n in qmeasures:
                 measure=ani.quality.QualityMeasure(m)(str(n)).vector().gather()
                 def_dict[str(n)].append([measure.mean(),measure.min(),measure.max()])
+            
             
         return def_dict
 
@@ -335,7 +352,7 @@ class Adaptor:
             # TODO - set as min for number of exports wanted
             # general statitics per mesh
             gen_stats={}
-            gen_stats["params"]=self.params
+            gen_stats["params"]=dict(self.params) # need to convert from AttrDict back to dict
             gen_stats["mesh_id"] = _m
             gen_stats["fp_iteration"] = _a           
             gen_stats["dof"]=sum(np.array([
@@ -362,7 +379,7 @@ class Adaptor:
 
             for _key,_value in self.mesh_seq.model_features.items():
                 # QC:
-                print(f'\t exporting features: in feature output: {_key,_value}')
+                # print(f'\t exporting features: in feature output: {_key,_value}')
                 features[_key] = _value
                 #  if not print("Issue with accessing model features on Model object - did you mean to define?")
 
@@ -381,7 +398,8 @@ class Adaptor:
             # if adjoint run - extract adjoint and estimator
             if 'adjoint' in self.mesh_seq.solutions[field]:
                 adj_sol = self.mesh_seq.solutions[field]['adjoint'][_m][0]
-                print('\t exporting features: get adjoint solution')
+                print(f'\t exporting features: get adjoint solution {adj_sol.dat.data[:]}')
+
                 features["adjoint_dofs"] = extract_array(adj_sol, centroid=True)
                 print('\t exporting features: extract adjoint dof')
                 features["estimator_coarse"] = extract_coarse_dwr_features(self.mesh_seq, fwd_sol, adj_sol, index=0)
@@ -389,8 +407,11 @@ class Adaptor:
 
             # add mesh stats into the general stats dictionary
             _mesh_stats = self.dict_mesh_stats() 
+            print('\t exporting features: add mesh stats')
             for _key,_value in _mesh_stats.items():
                 gen_stats[_key]=_value[_m]
+
+            
 
             # if the indicator exists
             if not all([a is None for a in self.mesh_seq.indicators.extract(layout="field")[field]]):
@@ -432,6 +453,63 @@ class Adaptor:
             print(f'\t exporting features: features output to {output_file}')
 
             return features
+        
+    #TODO: refactor output statments to be more pythonic - 
+
+    # def _output_selection(output="forward", format="vtk", **kwargs):
+    #     function_options = {
+    #         "forward": ,
+    #         "adjoint": ,
+    #         "metric": ,
+    #         "hessian": ,
+    #         "indicator": ,
+    #     }
+    #     try:
+    #         return function_options[output](output, format, **kwargs)
+    #     except KeyError as e:
+    #         raise ValueError(f"OUtput '{output}' not currently supported.") from e
+        
+    # def _output_function(self, output, field= None):
+    #     """
+    #     Output function to vtk, either for steady or unsteady
+    #     sets the output file and writes to it
+    #     """
+
+    #     # to write to local folder
+    #     vtk_folder = f"{self.local_filepath}/vtk_files_fpi{self.adapt_iteration}"
+
+    #     file_out = None
+    #     if field is None:
+    #         field = self.params["field"]
+
+    #     # output the function
+    #     if file_out is None:
+    #         file_out= VTKFile(f"{vtk_folder}/{output}.pvd")
+
+
+    # def _check_output_for(sol_obj):
+    #     """
+    #     check that forward solution exists in the solution object for all solutions
+    #     """
+
+    #     if sol_obj:
+    #         for _sol in _sol_obj:
+    #             # output forward solutions
+    #             if _sol[field]["forward"]:
+
+    # def _output_for(field):
+    #     """
+    #     gets forward solution and interates for vtk output
+    #     """
+    #     # get field
+    #     _sol_obj =  mesh_seq.solutions.extract(layout='subinterval')
+
+    #     # if the list evaluates to true
+    #     if _check_output_for():
+    #         for _t in range(np.shape(_sol[field]["forward"])[0]):
+    #             return _sol[field]['forward'][_t].subfunctions
+    #             # self.f_out.write(*_sol[field]['forward'][_t].subfunctions)
+
 
     def output_vtk_for(self, mesh_seq, field = None, ):
 
@@ -546,8 +624,8 @@ class Adaptor:
                 if _sol[field]["adjoint"]:
 
                     #QC:
-                    # print(_sol[field]['adjoint'])
-                    # print(f"adjoint shape {np.shape(_sol[field]['adjoint'])}")
+                    print(_sol[field]['adjoint'])
+                    print(f"adjoint shape {np.shape(_sol[field]['adjoint'])}")
 
                     if self.a_out is None:
                         self.a_out= VTKFile(f"{vtk_folder}/adjoint.pvd")
@@ -572,15 +650,20 @@ class Adaptor:
                         )
             with fd.CheckpointFile(chkpt_file, 'w') as afile:
                 afile.save_mesh(_mesh)
+                print(f'output params: {type(dict(mesh_seq.params))}')
                 _parameters={
-                    "params": mesh_seq.params,
+                    "params": dict(mesh_seq.params), # ej321 test
                     "mesh_stats":{} 
                 }
+                
+                # _parameters = mesh_seq.params.to_dict() # convert AttrDict back to dict type
+                # _parameters["mesh_stats"]={}
                 # add mesh stats into the general stats dictionary
                 _mesh_stats = self.dict_mesh_stats() 
                 for _key,_value in _mesh_stats.items():
+                    # print(f'output mesh stats {_key} {_value}')
                     _parameters["mesh_stats"][_key]=_value[_m]
-
+                print(_parameters)
                 afile._write_pickled_dict('/', 'parameters', _parameters)
 
                 # save forward solution
@@ -632,7 +715,7 @@ class Adaptor:
 
         # output vtks
         self.output_vtk_for(mesh_seq)
-        if method not in ["uniform", "steady_hessian", "time_hessian"] and not mesh_seq.steady:
+        if method not in ["uniform", "steady_hessian", "time_hessian"]:
             self.output_vtk_adj(mesh_seq)
 
         # output checkpoint
@@ -1599,7 +1682,10 @@ class Adaptor:
             metric.average(*_metrics[1:])
             # QC:
             # print(f'\t adaptor - steady anisotropic, combining {len(_metrics)} metrics for timestep')  
-        
+            metric.normalise(restrict_sizes=False, restrict_anisotropy=False)
+            metric.enforce_spd(restrict_sizes=True, restrict_anisotropy=True) # ej321 added
+
+
             self.metrics.append(metric)
 
         metrics = self.metrics

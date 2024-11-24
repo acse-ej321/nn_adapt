@@ -133,7 +133,7 @@ def get_values_at_elements(f):
     el = fs.ufl_element()
     if el.sub_elements == []:
         p = el.degree()
-        size = el.value_size * (p + 1) * (p + 2) // 2
+        size = fs.value_size * (p + 1) * (p + 2) // 2
     else:
         size = 0
         for sel in el.sub_elements:
@@ -182,7 +182,7 @@ def get_values_at_centroids(f):
     if el.sub_elements == []:
         p = el.degree()
         degrees = [p]
-        size = el.value_size * (p + 1) * (p + 2) // 2
+        size = fs.value_size * (p + 1) * (p + 2) // 2
         funcs = [f]
     else:
         size = 0
@@ -238,7 +238,7 @@ def get_tensor_at_centroids(f):
     if el.sub_elements == []:
         p = el.degree()
         degrees = [p]
-        size = el.value_size * (p + 1) * (p + 2) // 2
+        size = fs.value_size * (p + 1) * (p + 2) // 2
         funcs = [f]
     else:
         size = 0
@@ -375,11 +375,12 @@ def coarse_dwr_indicator(mesh_seq, fwd_sol,adj_sol, index=0):
     # Extract indicator in enriched space
     field=mesh_seq.params["field"]
 
-    F = mesh_seq.form(index)[field]
+    F = mesh_seq.forms[field]
+
     V=fwd_sol.function_space()
 
     # QC: 
-    # print(f'V: {fwd_sol.function_space()}')
+    print(f'V: {fwd_sol.function_space()}')
     # print(f'adjoint : {adj_sol}')
     dwr_star = get_dwr_indicator(F, adj_sol, test_space=V)
 
@@ -415,7 +416,6 @@ def extract_mesh_features(fwd_sol):
         return d, h1, h2, bnd
 
 def extract_coarse_dwr_features(mesh_seq, fwd_sol, adj_sol, index=0):
-    print(f'\n\n\nHERE')
     dwr_coarse = coarse_dwr_indicator(mesh_seq, fwd_sol, adj_sol, index)
     return extract_array(dwr_coarse)
 
@@ -532,7 +532,8 @@ def gnn_indicator_fit(features, mesh):
 
     # set root location for the saved model
     # TODO: make this not hardcoded or move 
-    localpath = '/home/phd01/nn_adapt'
+    # localpath = '/home/phd01/nn_adapt'
+    localpath = '/data0'
         
     # load model from pytorch
     gnn_model = torch.jit.load(f"{localpath}/trained_models/graphsage_5e-5_dwr_cap2.5.pt")
@@ -568,7 +569,8 @@ def gnn_noadj_indicator_fit(features, mesh):
 
     # set root location for the saved model
     # TODO: make this not hardcoded or move 
-    localpath = '/home/phd01/nn_adapt'
+    # localpath = '/home/phd01/nn_adapt'
+    localpath = '/data0'
         
     # load model from pytorch
     gnn_noadj_model = torch.jit.load(f"{localpath}/trained_models/graphsage_noadj.pt")
@@ -594,17 +596,18 @@ def mlp_indicator_fit(features, mesh):
     # TODO: setup now for steady, not unsteady problems
 
     # QC features input
-    # print(f'gnn indicator fit - input features: {features.keys()}')
+    print(f'gnn indicator fit - input features: {features.keys()}')
 
     # reformat for gnn - node and edge pytorch tensor objects
     node_attrs, edge_index = proc_data_item(features)
 
     # QC features reformated for gnn
-    # print(f'node size {node_attrs.shape}, edge size {edge_index.shape}')
+    print(f'node size {node_attrs.shape}, edge size {edge_index.shape}')
 
     # set root location for the saved model
     # TODO: make this not hardcoded or move 
-    localpath = '/home/phd01/nn_adapt'
+    # localpath = '/home/phd01/nn_adapt'
+    localpath = '/data0'
         
     # load model from pytorch
     mlp_model = torch.jit.load(f"{localpath}/trained_models/mlp.pt")
@@ -612,7 +615,7 @@ def mlp_indicator_fit(features, mesh):
     denormalise_func = torch.jit.load(f"{localpath}/trained_models/denormalise_targets_2196.pt") # TODO: Check with Siyi 
     
     # QC function imports working
-    # print(f'in the gnn indictor fit {gnn_model}')
+    print(f'in the gnn indictor fit {mlp_model}')
 
     # Run GNN model
     x_normalised = normalise_func(node_attrs)
@@ -639,7 +642,8 @@ def joe_indicator_fit(features, mesh):
 
     # set root location for the saved model
     # TODO: make this not hardcoded or move 
-    localpath = '/home/phd01/nn_adapt'
+    # localpath = '/home/phd01/nn_adapt'
+    localpath = '/data0'
         
     # load model from pytorch
     mlp_model = torch.jit.load(f"{localpath}/trained_models/mlp.pt")

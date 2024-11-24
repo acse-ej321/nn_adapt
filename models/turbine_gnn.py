@@ -22,17 +22,18 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
     
     def __init__(self, *args, **kwargs):
         self.thetis_manager={}
+        # TODO: check if this still utilized
         self.model_features={} # add for feature extraction ala E2N - model specific
         super().__init__(*args, **kwargs)
-        self.params =kwargs.get('parameters', self.get_default_parameters())
+        self.params =kwargs.get('parameters',
+                                 self.get_default_parameters())
 
     @staticmethod
     def get_default_parameters():
         return {
-                # Goalie neeed?
                 "enrichment_kwargs":{
                     "enrichment_method": "h",
-                    "num_enrichments": 1
+                    # "num_enrichments": 1
                 },
                 # field kwargs
                 "field":"solution_2d",
@@ -42,6 +43,7 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
                 "qoi_name":"power output",
                 "qoi_unit":"MW",
                 # simulation kwargs
+                "output_directory":'outputs_nn_adapt', # for thetis
                 "viscosity_coefficient":0.5,
                 "depth": 40.0,
                 "drag_coefficient":0.0025,
@@ -77,11 +79,16 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
                 "estimator_rtol":0.001,
                 "drop_out_converged": False,
                 "convergence_criteria":"any", # options are "all" or "any"
+                
                 # adaptation kwargs
                 "indicator_method": "gnn", # added as flag for fp iteration, options "gnn"
                 "adaptor_method":"steady_anisotropic",
                 "fix_boundary": False,
+                "area_labels": [],
+                "fix_area": False,
                 "indicator_method" : None,
+
+                #metric kwargs
                 "h_min":1.0e-8,
                 "h_max":500.0,
                 'a_max':1.0e5, # used:
@@ -89,10 +96,6 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
                 'average': True, # used:
                 'retall': True, # used:
                 'dm_plex_metric_p': np.inf,
-                    "area_labels": [],
-                "fix_area": False,
-                "indicator_method" : None,
-
             }
 
     @staticmethod
@@ -100,15 +103,22 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
    
         # Get local path if mesh exists
         # linux:
-        # local_path= 'data0'
-        # pc:
-        local_path = 'home/phd01'
-        local_folder = 'adaptwkflw/models/inputs'
-        file_name = 'aligned_dec23.msh'
-        meshpath = f"/{local_path}/{local_folder}/{file_name}"
-        print(os.getcwd())
+        local_path= 'data0'
+        local_folder = 'nn_adapt/models/inputs'
+
+        # pc: 
+        # local_path = 'home/phd01'
+        # local_folder = 'adaptwkflw/models/inputs'
+
+        # file_name = 'aligned_dec23.msh'
+        # meshpath = f"/{local_path}/{local_folder}/{file_name}"
+        # print(os.getcwd())
 
         # mesh = TurbineMeshSeq.create_turbine_mesh()
+
+        # create new mesh
+        meshpath = TurbineMeshSeq.create_turbine_mesh(filepath)
+
 
         def create_default_meshes(num_meshes,**kwargs):
 
@@ -153,6 +163,7 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
         # print(f'\n\n GET MODEL FEATURES: {self.model_features["physics_bathymetry"]}')
 
     # SPECIAL FOR THETIS -------------------------------------------------------VVVVVVVVVVV
+    
     @staticmethod
     def add_turbine(model, coordinates, D, dx_inner, z=0):
         """
@@ -182,7 +193,8 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
         return rec_list
 
     @staticmethod
-    def create_turbine_mesh(filename="inital_turbine_mesh.msh", m=0, L=1200.,W=500.,D=18., z=0., dx_inner=20.,dx_outer=20., n_min=1, n_max=8):
+    def create_turbine_mesh(meshpath, filename="inital_turbine_mesh.msh", m=0, L=1200.,W=500.,D=18., z=0., 
+                            dx_inner=20.,dx_outer=20., n_min=1, n_max=8):
         
         dim=2 #2D
         algorithm=8 #same as Joes E2N paper
@@ -193,8 +205,12 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
         y_min=50
         y_max=W-100
         #coordinates = rand_2d_coords(x_min,x_max,y_min,y_max,n_min=3,n_max=4)
+        # TODO: allow non default parameters
         params = TurbineMeshSeq.get_default_parameters()
         coordinates = params["coordinates"]
+
+        #QC
+        print(f'create turbine coordinates {coordinates}')
         # Initialize empty geometry using the build in kernel in GMSH
         # geometry = pygmsh.geo.Geometry() #
 
@@ -230,21 +246,21 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
             # geometry.generate_mesh(dim=dim,algorithm=algorithm,verbose=True)
             model.generate_mesh(dim=dim,algorithm=algorithm,verbose=True)
             # gmsh.initialize()
-            gmsh.write(filename) #needs extension?
+            meshfile = os.path.join(meshpath, filename)
+            gmsh.write(meshfile) #needs extension?
             # gmsh.clear()
             # geometry.__exit__()
         
         # return the coordinates of the turbine locations
-        return fd.Mesh(filename, name=f"mesh_0_{m}")
+        # return fd.Mesh(filename, name=f"mesh_0_{m}")
+        return meshfile
 
-    def get_flowsolver2d(self, mesh, ic, **kwargs):
+    def get_flowsolver2d(self, mesh, initial_condition, **kwargs):
         """
         :arg mesh: the mesh to define the solver on
         :arg ic: the initial condition
         """
         bathymetry = self.bathymetry(mesh)
-        Cd =fd.Constant(self.params['drag_coefficient'])
-        sp = self.params['solver_parameters']
 
         # Create solver object
         thetis_solver = thetis.solver2d.FlowSolver2d(mesh, bathymetry)
@@ -253,25 +269,30 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
         thetis_solver.export_initial_state = False 
         options = thetis_solver.options
 
+        # thetis output checks for QC
+        options.output_directory = self.params['output_directory']
+        options.fields_to_export = ['elev_2d', 'uv_2d','Bathymetry']
+
         # time stepper options  ej321 - add for understanding
         options.timestep = 20.0
-        options.simulation_export_time = 18.0
+        options.simulation_export_time = 20.0
         options.simulation_end_time = 18.0
         options.swe_timestepper_type = "SteadyState"
         options.swe_timestepper_options.ad_block_tag="solution_2d" # ej321 - for adjoint
-        options.swe_timestepper_options.solver_parameters = sp
+        # options.swe_timestepper_options.ad_block_tag="solution" # for adjoint
+        options.swe_timestepper_options.solver_parameters = self.params['solver_parameters']
         
         # parameter options ej321 - add for understanding
         options.element_family = "dg-cg"
         options.horizontal_viscosity = self.viscosity(mesh)
-        options.quadratic_drag_coefficient = Cd
+        options.quadratic_drag_coefficient = fd.Constant(self.params['drag_coefficient'])
         # other
         options.use_grad_div_viscosity_term = False
         options.use_lax_friedrichs_velocity = True
         options.lax_friedrichs_velocity_scaling_factor = fd.Constant(1.0)
         options.use_grad_depth_viscosity_term = False
 
-        options.no_exports = True
+        options.no_exports = False
         options.update(kwargs)
         # self._thetis_solver.create_equations() # ej321 moving to after all options set
 
@@ -279,28 +300,26 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
         # P1v_2d = self._thetis_solver.function_spaces.P1v_2d # ej321 - commented out
         P1v_2d = thetis.get_functionspace(mesh, "DG", 1, vector=True) # ej321 - added
         u_inflow = fd.assemble(interpolate(self.u_inflow(mesh), P1v_2d))
+
+        # check for flow direction and adjust boundaries
+        # TODO: seperate into get_bc function with options
+        if self.params["inflow_speed"]<0:
+            inflow_bnd = 2 # from right
+            outflow_bnd = 1 # to left
+        else:
+            inflow_bnd = 1 # from left
+            outflow_bnd = 2 # to right
+        #flipped boundaries
         thetis_solver.bnd_functions["shallow_water"] = {
-            1: {"uv": u_inflow},  # inflow, left
-            2: {"elev": fd.Constant(0.0)},  # outflow, right
+            inflow_bnd: {"uv": u_inflow},  # inflow, left
+            outflow_bnd: {"elev": fd.Constant(0.0)},  # outflow, right
             3: {"un": fd.Constant(0.0)},  # free-slip, sides
             4: {"uv": fd.Constant(fd.as_vector([0.0, 0.0]))},  # no-slip ej321 - will this work, is noslip adjoint with constants fixed?
-            5: {"elev": fd.Constant(0.0), "un": fd.Constant(0.0)}  # weakly reflective
+            5: {"elev": fd.Constant(0.0), "un": fd.Constant(0.0)},  # weakly reflective, turbine 1
+            6: {"elev": fd.Constant(0.0), "un": fd.Constant(0.0)}  # weakly reflective, turbine 2
         }
 
-
-        # SECTION FOR TIMESTEP UPDATE ej321
-        # a function to update the tidal_elev bc value every timestep
-        """
-        x = thetis.SpatialCoordinate(mesh2d)
-        g = 9.81
-        omega = 2 * thetis.pi / tidal_period
-        u_list = []
-        def update_forcings(t):
-            thetis.print_output("Updating tidal elevation at t = {}".format(t))
-            tidal_elev.project(tidal_amplitude*thetis.sin(omega*t + omega/pow(g*H, 0.5)*x[0]))
-            if  t % export_time == 0:
-                u_list.append(thetis.Function(solver_obj.fields.uv_2d))
-        """
+        print(f"for mesh {mesh} - {thetis_solver.bnd_functions['shallow_water']}")
 
         # Create tidal farm
         # ej321 - using continuous farm case as discrete?
@@ -311,10 +330,16 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
         # options.discrete_tidal_turbine_farms = self.farm(mesh)
         thetis_solver.create_equations() # ej321 moving to after all options set
 
+
+        # Apply initial guess
+        # u_init, eta_init = ic.subfunctions
+        vel_init, elev_init = initial_condition.subfunctions
+        thetis_solver.assign_initial_conditions(uv=vel_init, elev=elev_init)
+
         # Apply initial guess
         #u_init, eta_init = ic.split() #ej321
-        u_init, eta_init = ic.subfunctions #ej321 - added field for goalie consisitency
-        thetis_solver.assign_initial_conditions(uv=u_init, elev=eta_init)
+        # u_init, eta_init = ic.subfunctions #ej321 - added field for goalie consisitency
+        # thetis_solver.assign_initial_conditions(uv=u_init, elev=eta_init)
 
         cb = thetis.turbines.TurbineFunctionalCallback(thetis_solver)
         
@@ -450,6 +475,7 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
         """
         # NOTE: We assume a constant inflow
         inflow_speed=self.params["inflow_speed"]
+        print(f"\n\n\tin u_inflow {inflow_speed}")
         return fd.as_vector([inflow_speed, 0])
 
     # def ic(self, mesh):
@@ -565,27 +591,52 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
             print(f"add mesh to manager")
             # presumably the first run such that we fix the function space
             # for the problem to avoid recursive loop
-            P1v_2d = thetis.get_functionspace(mesh, "DG", 1, vector=True)
-            P2_2d = thetis.get_functionspace(mesh, "CG", 2)
-            _fs = P1v_2d * P2_2d
+            # P1v_2d = thetis.get_functionspace(mesh, "DG", 1, vector=True)
+            # P2_2d = thetis.get_functionspace(mesh, "CG", 2)
+            # _fs = P1v_2d * P2_2d
 
-            # Alt IC looks like this is not used?
-            # {"solution_2d": fd.interpolate(self.u_inflow(_fs.mesh),u)}
+            # get the goalie index for the current mesh:
+            mesh_index = self.meshes.index(mesh)
 
-            q = fd.Function(_fs)
-            u, eta = q.subfunctions #ej321
-            u.interpolate(self.u_inflow(_fs.mesh))
-            init = {"solution_2d": q}
+            # asign thetis flow solver object to dicitonary
+            _fs = self._initial_fs(mesh_index)
+            solv=self.get_flowsolver2d(mesh, self._intial_condition(_fs))
 
-            solv=self.get_flowsolver2d(mesh, init["solution_2d"])
-            # print(f'solv {solv}')
+            print(f'solv {solv}')
 
             self.thetis_manager[mesh] = solv
             # print(self.thetis_manager)
     
             # retrun the thetis solver
             return self.thetis_manager[mesh] 
+
+
+    def _initial_fs(self, index):
         
+        mesh = self[index]
+        P1v_2d = thetis.get_functionspace(mesh, "DG", 1, vector=True)
+        P1_2d = thetis.get_functionspace(mesh, "CG", 1)
+        _ifs = P1v_2d * P1_2d
+
+        print(f'\n in intial fs, {index} - mesh {mesh}')
+
+        return _ifs
+
+
+    def _intial_condition(self, _ifs):
+
+        print(f"\n\n initial condition - mesh {self}")
+
+        # define initial condition function from initial function space
+        _ic =   fd.Function(_ifs)
+        vel_init, elev_init = _ic.subfunctions # fd.split(q) # avoid subfunctions?
+        #TODO: mesh passed but never utilized
+        vel_init.interpolate(self.u_inflow(_ifs.mesh()))
+
+        print(f'in initial conditions {vel_init.dat.data[:]}')
+        print(self.params["inflow_speed"])
+
+        return _ic
 
 
     # SPECIAL FOR THETIS -------------------------------------------------------^^^^^^^^^^
@@ -596,10 +647,13 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
         Construct the (mixed) finite element space used for the
         prognostic solution.
         """
+        field=self.params["field"]  
+
+        print(f"get function spaces, mesh {mesh}")
         thetis_obj=self.manage_thetis_object(mesh)
 
         # return {"solution_2d":self._thetis_solver.function_spaces.V_2d}
-        return {"solution_2d": thetis_obj.function_spaces.V_2d}
+        return {field: thetis_obj.fields.solution_2d.function_space()}
 
 
     # @staticmethod
@@ -612,29 +666,27 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
         Compute an initial condition based on the inflow velocity
         and zero free surface elevation.
         """
-
+        field=self.params["field"]  
         thetis_obj=self.manage_thetis_object(self[0])
-        _fs = thetis_obj.function_spaces.V_2d
+        _fs = thetis_obj.fields.solution_2d.function_space()
         # P1v_2d = thetis.get_functionspace(self[0], "DG", 1, vector=True)
         # P2_2d = thetis.get_functionspace(self[0], "CG", 2)
         # _fs = P1v_2d * P2_2d
-        q = fd.Function(_fs)
-        u, eta = q.subfunctions #ej321
-        print("here")
-        u.interpolate(self.u_inflow(self[0]))
+        # rebuild initial conditions
+        q = self._intial_condition(_fs)
 
-        return {"solution_2d": q}
+        return {field: q}
 
-    def get_form(self, field="solution_2d"):
+    # def get_form(self, field="solution_2d"):
     
-        def form(index):
-        # def form(index, sols):
-            thetis_obj=self.manage_thetis_object(self[index])
+    #     def form(index):
+    #     # def form(index, sols):
+    #         thetis_obj=self.manage_thetis_object(self[index])
 
-            #The weak form of the shallow water equations.
-            return {"solution_2d":thetis_obj.timestepper.F}
+    #         #The weak form of the shallow water equations.
+    #         return {"solution_2d":thetis_obj.timestepper.F}
         
-        return form
+    #     return form
 
     # UDPATE
     # def get_bcs(self):
@@ -676,10 +728,16 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
             # thetis_obj.fields.solution_2d.assign(ic[field])
             # thetis_obj.fields.solution_2d.assign(_sol_old)
 
+            # Communicate variational form to mesh_seq
+            self.read_forms({field:thetis_obj.timestepper.F})
+            
+
             thetis_obj.fields.solution_2d.assign(_sol)
             
 
             print(f"\n BEFORE ITERATE {thetis_obj.callbacks['export']['turbine'].integrated_power[0]}\n\n")
+            
+
 
             iterate = thetis_obj.get_iterate()
             # thetis_obj.iterate_ej321()
@@ -691,6 +749,7 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
             print(thetis_obj.callbacks['export']['turbine'].integrated_power[0])
             solution = thetis_obj.fields.solution_2d
             # ic[field]=solution
+
 
 
             # timer end

@@ -13,21 +13,37 @@ import gmsh
 from collections import OrderedDict
 from time import perf_counter
 import logging
+import json
 
 from firedrake.__future__ import interpolate # ej321 - temp for firedrake update
 
 import os
 
+
+def get_parameters_from_json(filepath):
+    if os.path.exists(filepath):
+        with open(filepath, 'r') as fp:
+            params = json.load(fp)
+        print(f"load parameters from file: {filepath}")
+    else: 
+        params = TurbineMeshSeq.get_default_parameters()
+        print(f"load parameters from defaults: {filepath}")
+    return params
+
+
 class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
     
     def __init__(self, *args, **kwargs):
         self.thetis_manager={}
+        self.filepath = kwargs.get("local_filepath",
+                                 os.getcwd())
         # TODO: check if this still utilized
         self.model_features={} # add for feature extraction ala E2N - model specific
         super().__init__(*args, **kwargs)
+        # self.params =kwargs.get('parameters',
+        #                          self.get_default_parameters())
         self.params =kwargs.get('parameters',
-                                 self.get_default_parameters())
-
+                                 get_parameters_from_json(f"{self.filepath}/input_parameters.json"))
     @staticmethod
     def get_default_parameters():
         return {

@@ -15,6 +15,7 @@ from firedrake.petsc import PETSc
 # timing functions manually:
 import logging
 from time import perf_counter
+import json
 
 import shutil
 
@@ -56,22 +57,35 @@ def create_folder(rootfolder, folderkey, filepath):
     if os.path.isdir(filepath):
         print(f'simulation using folder: {filepath}')
         return filepath
+    
+def create_params(Model, parameters):
+    """
+    combine all parameters into one dictionary and export to json
+    note: done to pass all parameters to Model in blind init given setup of Goalie
+    
+    adding feature from Joe's code parameter class to pass keys as methods
+    TODO: figure out a better place for this
+    """
+    params=AttrDict() # TODO: set some defaults for all parameters passed      
+    params.update(Model.get_default_parameters())
+    params.update(parameters)
+
+    return params
 class Simulation():
     
     def __init__(self, Model, rootfolder=None, filepath=None, parameters={}):
         self.rootfolder = rootfolder if rootfolder else os.getcwd()
         self.filepath = create_folder(self.rootfolder, str(Model.__name__), filepath)
-        self.params=AttrDict() # TODO: set some defaults for all parameters passed
-        self.update_params(Model.get_default_parameters())
-        self.update_params(parameters)        
-        self.initial_meshes = Model.get_default_meshes(self.filepath,**self.params)
-        self.time_partition = Model.get_default_partition(**self.params)
-        self.mesh_seq = Model(self.time_partition,
-                            self.initial_meshes, 
-                                qoi_type=self.params["qoi_type"],
-                                parameters=self.params # this is not split from mesh_seq, so passing for child class
-                                )
-        self.adaptor=Adaptor(self.mesh_seq, self.params, filepath = self.filepath)
+        self.params = create_params(Model, parameters)
+        self.Model = Model
+        self.local_filepath = None
+        # self.mesh_seq = Model(self.time_partition,
+        #                     self.initial_meshes, 
+        #                         qoi_type=self.params["qoi_type"],
+        #                         parameters=self.params # this is not split from mesh_seq, so passing for child class
+        #                         )
+
+        # self.adaptor=Adaptor(self.mesh_seq, self.params, filepath = self.filepath)
 
     def setup_logging_file(self, filepath):
         # need to remove logging handler explicity to switch filepath if one has
@@ -83,18 +97,105 @@ class Simulation():
             filename=os.path.join(filepath,"timesout.txt"),
             format=' %(asctime)s - %(levelname)s - %(message)s'
             )
+    
+    def set_outfolder(self, suffix=""):
+        # TODO: fix to only create file if actually output
 
-    def update_params(self, other_parameters):
-        """
-        for updating parameters with additional 
+        self.local_filepath = f"{self.filepath}/{suffix}"
+        if  not os.path.isdir(self.local_filepath):
+            os.makedirs(self.local_filepath) 
         
-        adding feature from Joe's code parameter class to pass keys as methods
-        TODO: figure out a better place for this
-        """
+        # temporarily set this as the current working directory
+        os.chdir(self.local_filepath)
 
-        self.params.update(other_parameters)
+        # QC:
+        print(f'current working directory changed to: {self.local_filepath}')
+
+    def output_params_json(self):
+        """
+        dump parameter dictionary to json file in local file path
+        """
+        # TODO: this could be a static method as self not really needed
+        with open(f'{self.local_filepath}/input_parameters.json', 'w') as fp:
+            json.dump(self.params, fp)
+        print(f"writing parameters to json: {self.local_filepath}")
+
+
+
 
     @PETSc.Log.EventDecorator("SIMULATION")
+    def run_simulation(self):
+
+        adaptor_method = self.params["adaptor_method"]
+        # set output folder with current date
+        self.set_outfolder(f'{adaptor_method}_{datetime.now().strftime("%H%M%S")}')
+        
+        # setup logging
+        self.setup_logging_file(self.local_filepath)
+        logging.info(f'\n\tOutput Folder: {os.getcwd()}')
+        logging.info(f'\n input parameters: {self.params}')
+
+        # timer start:
+        duration = -perf_counter()
+
+        # run FPI
+        # output parameters for init of mesh_seq
+        self.output_params_json()
+
+        # # call instance of mesh_seq
+        mesh_seq = self.Model(
+            self.Model.get_default_partition(**self.params),
+            self.Model.get_default_meshes(self.filepath,**self.params),
+            qoi_type=self.params["qoi_type"]
+            )
+        
+        # # call instance of adaptor
+        adaptor = AdaptorSelection(method = adaptor_method, **self.params)
+
+
+        if "hessian" in self.params["adaptor_method"] or "uniform" in self.params["adaptor_method"]:
+            
+            # calls the fixed point iteration from the MeshSeq parent class directly
+            # TODO: is this the best solution for this? Especially now that the 
+                # outputs of solution and/or indicator are saved on the MeshSeq object directly?
+            gol_adj.MeshSeq.fixed_point_iteration( 
+                mesh_seq, 
+                adaptor.adaptor,
+                parameters = self.params   
+            )
+        # if ML method need which needs adjoint
+        elif  self.params["indicator_method"] in ["gnn","mlp","gnn_noadj",]:
+            print('Adjoint solver')
+            gol_adj.AdjointMeshSeq.fixed_point_iteration( 
+                mesh_seq, 
+                adaptor.adaptor,
+                parameters = self.params 
+            )
+
+        else:
+            mesh_seq.fixed_point_iteration( 
+                adaptor.adaptor,
+                enrichment_kwargs=self.params["enrichment_kwargs"],
+                # adaptor_kwargs=self.params["adaptor_kwargs"]
+                parameters = self.params  
+            )
+
+        # timer end
+        duration += perf_counter()
+        logging.info(f'fixed point iterator total time: {duration:.6f}')
+        logging.info(f'fixed point iterator total iterations: {len(adaptor.mesh_stats)}')
+        
+        # QC plot for fixed point loop statistics:
+        adaptor.plot_mesh_convergence_stats(mesh_seq,plot_len =6,subplot_ht=2)
+
+        # reset working directory to default
+        os.chdir(f"{self.rootfolder}")
+
+        # shut off logging
+        logging.shutdown()
+
+
+
     def run_fp_loop(self):
 
         # set output folder with current date

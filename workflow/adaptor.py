@@ -27,6 +27,625 @@ from workflow.features import gnn_indicator_fit, gnn_noadj_indicator_fit, mlp_in
 
 
 from collections import defaultdict
+import abc
+
+def AdaptorSelection(method = "uniform", **kwargs):
+    adaptor_methods = {
+        "uniform": Adaptor_B,
+        "hessian": Adaptor_H,
+        "isotropic": Adaptor_I,
+        "anisotropic": Adaptor_A,
+        # "time_hessian": time_hessian_adaptor,
+        # "time_isotropic": time_isotropic_adaptor,
+        # "steady_anisotropic": steady_anisotropic_adaptor,
+        # "time_anisotropic": time_anisotropic_adaptor
+    }
+    try:
+        return adaptor_methods[method](**kwargs)
+    except KeyError as e:
+        raise ValueError(f"Method '{method}' not recognised.") from e
+
+# self.target_complexities
+# self.metrics
+# self.hessians
+
+
+# # paramters
+# self.label='forward'
+# field = mesh_seq.params["field"]
+# solutions = mesh_seq.solutions
+# iteration = mesh_seq.fp_iteration
+# base =mesh_seq.params["base"]
+# target = mesh_seq.params["target"]
+# miniter = mesh_seq.params["miniter"]
+class Adaptor_B(metaclass =abc.ABCMeta):
+    """
+    Base class for Adaptors
+    """
+    def __init__(self, **kwargs):
+        self.qois = []
+        self.mesh_stats = []
+    
+    def dict_mesh_stats(self, mesh_seq):
+        """
+        Computes and returns a dictionary containing statistics for each mesh in the sequence.
+
+        This method iterates over a sequence of mesh objects and collects statistics including
+        the number of elements and vertices, as well as the mean, minimum, and maximum values 
+        for each quality metric.
+
+        :returns: summary mesh statictics in a dictionary
+
+        """
+        
+        def_dict = defaultdict(list)
+        for m in mesh_seq:
+            def_dict['elements'].append(m.num_cells())
+            def_dict['vertices'].append(m.num_vertices())
+
+            # TODO: 
+            # added explicitly as cxx seemed to not be filtering 3d facets out of 2d
+            qmeasures = (
+                "min_angle",
+                "area",
+                # "volume",
+                # "facet_area",
+                "aspect_ratio",
+                "eskew",
+                "skewness",
+                "scaled_jacobian",
+                # "metric",
+            )
+            
+            for n in qmeasures:
+                measure=ani.quality.QualityMeasure(m)(str(n)).vector().gather()
+                def_dict[str(n)].append([measure.mean(),measure.min(),measure.max()])
+            
+        return def_dict
+    
+    def plot_mesh_convergence_stats(self, mesh_seq, plot_len=10, subplot_ht=2, show=False):
+        
+        # these are repeated so just grabbing the first one
+        def_dict = self.mesh_stats[0]
+
+        # use the length of the first one to create plots for each
+        fig,ax = plt.subplots(len(def_dict)+2, 1,
+                figsize=(plot_len,subplot_ht*len(def_dict)),
+                sharex=True, layout="constrained")
+
+        # iterate over each statitic category and get key name
+        ax[0].plot(mesh_seq.estimator_values)
+        ax[0].set_ylabel("estimator value")
+        qoi_vals = max(self.qois,mesh_seq.qoi_values)
+        ax[1].plot(qoi_vals)
+        ax[1].set_ylabel("qoi value")
+        plt.xlabel("iterations")
+        for d,key in enumerate(self.mesh_stats[0].keys()): # d in mesh statistic
+            
+            # get the number of meshes - reused so extract to variable once
+            nmesh=len(mesh_seq.meshes)
+            # create empty lists to hold values for plotting
+            x=[]
+            y=[]
+            y_min =[]
+            y_max =[]
+            # iterate through the mesh adaption iterations and get dictionary for each
+            for index,def_dict in enumerate(self.mesh_stats): # index in interation
+                # get the x coordinate - the iteration number
+                x.append(index)
+                # for each mesh in the mesh sequence             
+                for i in range(nmesh): # i is mesh number
+                    # if the area is a list of values - like vertices or elements
+                    if (isinstance(def_dict[key][0], int)):
+                        # for the first iteration, build the lists
+                        if index ==0:
+                            y.append([def_dict[key][i]])
+                        # for all other iterations, append to lists
+                        else:
+                            y[i].append(def_dict[key][i])
+                    # if the area is a list of lists
+                    else:
+                        # for the first iteration, build the lists
+                        if index ==0:
+                            pass
+
+                            y.append([def_dict[key][i][0]])
+                            y_min.append([def_dict[key][i][1]])
+                            y_max.append([def_dict[key][i][2]])
+                        # for all other iterations, append to lists
+                        else:
+
+                            y[i].append(def_dict[key][i][0])
+                            y_min[i].append(def_dict[key][i][1])
+                            y_max[i].append(def_dict[key][i][2])
+
+            # create a color spectrum to iterate through
+            color = iter(cm.gist_rainbow(np.linspace(0, 1, nmesh)))
+            # for each y grouping per mesh, plot the values
+            for ny_,y_ in enumerate(y):
+                c = next(color)
+                ax[d+2].plot(x[:],y_[:], c=c, label=f'mesh {ny_}')
+                ax[d+2].set_ylabel(key)
+                ax[d+2].legend()
+
+        # assumes the local filepath has been set as the cwd
+        local_filepath = os.getcwd()
+        print(f'\n\n local filepath {local_filepath}')
+        _filepath = os.path.join(
+                local_filepath,
+                f'mesh_convergence_statistics.jpg'
+                )
+        print(f"fig saving to: {_filepath}")
+        fig.savefig(_filepath)
+
+        if show:
+            plt.show()
+
+    def _get_initial_stats(self, mesh_seq):
+        """
+        append statistics to relavent lists
+        """
+        self.qois.append(
+            fd.assemble(
+                mesh_seq.calc_qoi(-1, mesh_seq.solutions)
+                )
+            )
+        self.mesh_stats.append(self.dict_mesh_stats(mesh_seq))
+        
+        # log stats
+        logging.info(f'qoi: {self.qois[-1]}')
+        logging.info(f'mesh_stats: {self.qois[-1]}')
+
+        # other:
+
+        # timer start
+
+    # metric loop
+    def _calculate_metrics(self, mesh_seq):
+        pass
+    
+
+    # adapt the mesh
+    def _adapt_meshes(self, mesh_seq):
+
+        # timer start:
+        duration = -perf_counter()
+
+        for i in range(len(mesh_seq)):
+            # only run to min number of iterations
+            # TODO: check where parsing miniter from now
+            if mesh_seq.fp_iteration >= mesh_seq.params["miniter"]:
+                print(f'\n reached max uniform iterations at {mesh_seq.fp_iteration}\
+                base on min iter {mesh_seq.params["miniter"]}')
+                return False
+        
+            # use mesh hierarchy to halve mesh spacing until converged
+            if not mesh_seq.converged[i]:
+                # QC:
+                print(f'\t adaptor - new mesh name: mesh_{i}_{mesh_seq.fp_iteration +1}')
+                mh = fd.MeshHierarchy(mesh_seq.meshes[i],1)
+                mesh_seq.meshes[i] = mh[-1]
+                mesh_seq.meshes[i].name = f'mesh_{i}_{mesh_seq.fp_iteration +1}'
+
+        # timer end
+        duration += perf_counter()
+        logging.info(f'adaptor - uniform adaptor time taken: {duration:.6f}')
+                
+        
+
+    # print info
+    def _adaptor_info(self, mesh_seq):
+        """
+        Print progress of adaptation to screen
+        """
+        num_vertices = mesh_seq.count_vertices()
+        num_elements = mesh_seq.count_elements()
+        gol_adj.pyrint(f'adaptor - finish iteration: {mesh_seq.fp_iteration + 1}')
+        # gol_adj.pyrint(f"adapt iteration {mesh_seq.fp_iteration + 1}:")
+        for i, (nvert, nelem) in enumerate(zip(num_vertices, num_elements)):
+            gol_adj.pyrint(
+                f"subinterval: {i} vertices: {nvert:4d} elements: {nelem:4d}"
+            )
+
+    def adaptor(self, mesh_seq, solutions = None, indicators=None):
+        self._get_initial_stats(mesh_seq)
+        self._calculate_metrics(mesh_seq)
+        self._adapt_meshes(mesh_seq)
+        self._adaptor_info(mesh_seq)
+        return True
+
+
+class Adaptor_H(Adaptor_B):
+    """
+    Hessian class for Adaptors
+    """
+    def __init__(self, **kwargs):
+        self.field = kwargs.get("field")
+        self.miniter = kwargs.get("miniter")
+        self.maxiter = kwargs.get("maxiter")
+        self.base_complexity = kwargs.get("base")
+        self.target_complexity = kwargs.get("target")
+        self.h_min = kwargs.get("h_min")
+        self.h_max = kwargs.get("h_max")
+        self.a_max = kwargs.get("a_max")
+        self.complexities = []
+        self.ramp_complexities = []
+        self.hessians=[]
+        self.metrics=[]
+        super().__init__(**kwargs)
+
+    def _set_ramp_complexity(self):
+        """
+        function to set the ramp complexity based on base and targets set 
+        """
+        ramp_complexity_list=list(self.base_complexity+(self.target_complexity
+                                             -np.geomspace(self.target_complexity,
+                                                 self.base_complexity, 
+        num=self.miniter+1, dtype=int))) +[self.target_complexity]*20
+        
+
+        return ramp_complexity_list
+
+    def _set_metric_parameters(self, mesh_seq):
+        """
+        set the metric parameters to be used for emtric construction
+        """
+        
+        ramp_complexity_list = self._set_ramp_complexity()
+        
+        metric_params = {"dm_plex_metric_target_complexity":ramp_complexity_list[mesh_seq.fp_iteration],
+                "dm_plex_metric_p": 1,
+            }
+        self.ramp_complexities.append(metric_params["dm_plex_metric_target_complexity"])
+
+        return metric_params
+
+    def _calculate_metrics(self, mesh_seq):
+
+        self.metrics = []
+
+        mp = self._set_metric_parameters(mesh_seq)
+
+        # Loop through each time step in the MeshSeq
+        for i, sols_step in enumerate(mesh_seq.solutions[self.field]['forward']):
+
+            # QC:
+            print(f"\n in steady hessian, solution loop i{i} ")
+            # print(f"- sols_step: {sols_step}")
+
+            # list to hold metrics per time step - to be combined later
+            # _metrics=[]
+            self.hessians=[]
+            
+            # loop through time increment solution in the current time step
+            for j, sol in enumerate(sols_step):
+
+                # QC:
+                print(f"\n in steady hessian, solution loop j{j} ")
+                # print(f" - sol: {sol}")
+            
+                # Recover the Hessian of the current solution
+                hessians = [*get_hessians(sol, metric_parameters=mp)] # ej321
+                hessian = hessians[0] # ej321 - set the first hessian to the base
+                
+                hessian.average(*hessians[1:]) # ej321 - all the other hessians
+            
+                hessian.set_parameters(mp)
+            
+                # ej321 - steps not in Joe's workflow?
+                # for steady state - space normalisation
+                hessian.normalise()
+                
+                # _metric = hessian
+
+                # append the metric for the step in the time partition
+                # _metrics.append(_metric)
+                # TODO: just output 
+                self.hessians.append(hessian)
+                
+            _hessians = self.hessians
+
+            # constrain metric
+            print(f"\n\n ADDING CONSTRAINS IN ADAPT HESSIAN STEADY: \n")
+            gol_adj.enforce_variable_constraints(_hessians, 
+                h_min = self.h_min,
+                h_max= self.h_max,
+                a_max= self.a_max
+                )
+
+            # QC:
+            print(f'constrained metrics by\
+             h_min: {self.h_min} h_max: {self.h_max} a_max: {self.a_max}')
+
+            # print(f'combining {len(_metrics)} metrics for timestep')
+            metric =_hessians[0] # ej321 - set the first hessian to the base
+
+            if mesh_seq.steady:
+                # TODO: does this actually do anything in the steady case?
+                print(f'in steady hessian - hessian length {len(_hessians)}')
+                metric.average(*_hessians[1:]) # ej321 - all the other hessians
+            else:
+                dt = mesh_seq.time_partition.timesteps[i]
+                metric.average(*_hessians[1:], weights=[dt]*len(_hessians)) # ej321 - all the other hessians     
+        
+        
+            # metrics.append(metric)
+            self.metrics.append(metric)    
+
+    # adapt the mesh
+    def _adapt_meshes(self, mesh_seq):
+
+        self.complexities = []
+
+        # timer start:
+        duration = -perf_counter()
+
+        if not mesh_seq.steady:
+            # Apply space time normalisation
+            mp = self._set_metric_parameters(mesh_seq)
+            gol_adj.space_time_normalise(self.metrics, mesh_seq.time_partition, mp)
+
+        for i, metric in enumerate(self.metrics):
+                    
+            # re-estimate resulting metric complexity 
+            self.complexities.append(metric.complexity())
+            
+            # Adapt the mesh
+            if not mesh_seq.converged[i]:
+                # print(f'new mesh name mesh_{i}_{iteration+1}')
+                mesh_seq.meshes[i] = ani.adapt(mesh_seq.meshes[i],
+                                                metric, name=f'mesh_{i}_{mesh_seq.fp_iteration+1}')
+                # print(f'new mesh: {mesh_seq.meshes[i].name}')
+
+
+        # timer end
+        duration += perf_counter()
+        logging.info(f'adaptor - hessian adaptor time taken: {duration:.6f}')
+
+    def _adaptor_info(self, mesh_seq):
+        """
+        Print progress of adaptation to screen
+        """
+        num_vertices = mesh_seq.count_vertices()
+        num_elements = mesh_seq.count_elements()
+        iter_complex = self.ramp_complexities[mesh_seq.fp_iteration]
+        gol_adj.pyrint(f'adaptor - finish iteration: {mesh_seq.fp_iteration + 1} target: {iter_complex}')
+        # gol_adj.pyrint(f"adapt iteration {mesh_seq.fp_iteration + 1}:")
+        for i, (nvert, nelem, complexity) in enumerate(zip(num_vertices, num_elements, self.complexities)):
+            gol_adj.pyrint(
+                f"subinterval: {i} vertices: {nvert:4d} elements: {nelem:4d} complexity: {complexity:4.0f}"
+            )
+
+    def adaptor(self, mesh_seq, solutions = None, indicators=None):
+        self._get_initial_stats(mesh_seq)
+        self._calculate_metrics(mesh_seq)
+        self._adapt_meshes(mesh_seq)
+        self._adaptor_info(mesh_seq)
+
+        # check if the target complexity has been (approximately) reached on each subinterval
+        continue_unconditionally = np.array(self.complexities) < 0.90 * self.target_complexity
+        return continue_unconditionally
+
+class Adaptor_I(Adaptor_H):
+    """
+    Isotropic class for Adaptors
+    """
+    def __init__(self, **kwargs):
+
+        super().__init__(**kwargs)
+
+    def _calculate_metrics(self, mesh_seq):
+
+        self.metrics = []
+
+        mp = self._set_metric_parameters(mesh_seq)
+
+        # Loop through each time step in the MeshSeq
+        for i, sols_step in enumerate(mesh_seq.solutions[self.field]['forward']):
+
+            # list to hold metrics per time step - to be combined later
+            
+            _metrics=[]
+
+            # Define the Riemannian metric
+            P1_ten = fd.TensorFunctionSpace(mesh_seq.meshes[i], "CG", 1)
+            
+            # loop through time increment solution in the current time step
+            for j, sol in enumerate(sols_step):
+                
+                # QC:
+                print(f"\n in steady isotropic, solution loop i{i} ")
+                # print(f"- sols_step: {sols_step}")
+
+                # get local indicator 
+                indi = mesh_seq.indicators.extract(layout="field")[self.field][i][j] #update indicators
+                                    
+                # local instance of Riemanian metric
+                _metric = ani.metric.RiemannianMetric(P1_ten)
+                
+                # reset parameters as a precaution
+                _metric.set_parameters(mp)
+                
+                # Deduce an isotropic metric from the error indicator field
+                _metric.compute_isotropic_metric(error_indicator=indi, interpolant="L2")
+                _metric.normalise()
+                
+                # append the metric for the step in the time partition
+                _metrics.append(_metric)
+
+            # constrain metric
+            gol_adj.enforce_variable_constraints(_metrics, 
+                h_min = self.h_min,
+                h_max= self.h_max,
+                a_max= self.a_max
+                )
+
+            # QC:
+            print(f'constrained metrics by\
+             h_min: {self.h_min} h_max: {self.h_max} a_max: {self.a_max}')
+                
+            metric =_metrics[0] # ej321 - set the first hessian to the base
+            
+            
+            if mesh_seq.steady:
+                metric.average(*_metrics[1:]) # ej321 - all the other hessians
+            else:
+                dt = mesh_seq.time_partition.timesteps[i]
+                metric.average(*_metrics[1:], weights=[dt]*len(_metrics)) # ej321 - all the other hessians  
+             
+        
+            # metrics.append(metric)
+            self.metrics.append(metric)
+
+            # OUTPUT TO VTK - CALLBACK? or in adaptor?
+
+
+class Adaptor_A(Adaptor_H):
+    """
+    Anisotropic class for Adaptors
+    """
+    def __init__(self, **kwargs):
+
+        super().__init__(**kwargs)
+
+    def _calculate_metrics(self, mesh_seq):
+
+        self.metrics = []
+
+        mp = self._set_metric_parameters(mesh_seq)
+
+        # Loop through each time step in the MeshSeq
+        for i, sols_step in enumerate(mesh_seq.solutions[self.field]['forward']):
+
+            # list to hold metrics per time step - to be combined later
+            _metrics=[]
+
+            # Define the Riemannian metric
+            P1_ten = fd.TensorFunctionSpace(mesh_seq.meshes[i], "CG", 1)
+            
+            # loop through time increment solution in the current time step
+            for j, sol in enumerate(sols_step):
+                
+                # get local indicator 
+                indi = mesh_seq.indicators[self.field][i][j]
+
+                # Recover the Hessian of the current solution
+                duration = -perf_counter()
+                hessians = [*get_hessians(sol, metric_parameters=mp)] # ej321
+                hessian = hessians[0] # ej321 - set the first hessian to the base
+                
+                # timer end
+                duration += perf_counter()
+                logging.info(f' adapt - anisotropic hessian est time taken: {duration:.6f}')
+                
+                hessian.average(*hessians[1:]) # ej321 - all the other hessians
+                
+                # append list for analysis
+                self.hessians.append(hessian)
+                                    
+                # local instance of Riemanian metric
+                _metric = ani.metric.RiemannianMetric(P1_ten)
+                
+                # reset parameters as a precaution
+                _metric.set_parameters(mp)
+                
+                # Deduce an anisotropic metric from the error indicator field and the Hessian
+                # _metric.compute_anisotropic_dwr_metric(indi, hessian, interpolant="L2")
+                _metric.compute_anisotropic_dwr_metric(indi, hessian) #ej321 default interpolant is Clement
+                
+                # append the metric for the step in the time partition
+                _metrics.append(_metric)
+
+            # constrain metric
+            gol_adj.enforce_variable_constraints(_metrics, 
+                h_min = self.h_min,
+                h_max= self.h_max,
+                a_max= self.a_max
+                )
+
+            # QC:
+            print(f'constrained metrics by\
+             h_min: {self.h_min} h_max: {self.h_max} a_max: {self.a_max}')
+
+            metric =_metrics[0] # ej321 - set the first hessian to the base
+            if mesh_seq.steady:
+                metric.average(*_metrics[1:]) # ej321 - all the other hessians
+            else:
+                dt = mesh_seq.time_partition.timesteps[i]
+                metric.average(*_metrics[1:], weights=[dt]*len(_metrics)) # ej321 - all the other hessians  
+             
+            self.metrics.append(metric)
+
+
+            # OUTPUT TO VTK - CALLBACK? or in adaptor?
+
+
+
+
+    def _output_selection(output="forward", format="vtk", **kwargs):
+        function_options = {
+            "forward": _output_forward,
+            "adjoint": ,
+            "metric": ,
+            "hessian": ,
+            "indicator": ,
+        }
+
+        # to write to local folder
+        vtk_folder = f"{self.local_filepath}/vtk_files_fpi{self.adapt_iteration}"
+
+        file_out = None
+        if field is None:
+            field = self.params["field"]
+
+        # output the function
+        if file_out is None:
+            file_out= VTKFile(f"{vtk_folder}/{output}.pvd")
+        try:
+            return function_options[output](output, file_out, field = None, **kwargs)
+        except KeyError as e:
+            raise ValueError(f"OUtput '{output}' not currently supported.") from e
+
+
+    def _output_forward(self, mesh_seq, file_out, field= None):
+        """
+        Output forward solution to vtk, either for steady or unsteady
+        sets the output file and writes to it
+        """
+
+        _sol_obj =  mesh_seq.solutions.extract(layout='subinterval')
+
+        
+        assert all([True for _sol in _sol_obj if _sol[field]["forward"]]),\
+        f"issue with forward solution field"
+
+        for _sol in _sol_obj:
+            for _t in range(np.shape(_sol[field]["forward"])[0]):
+                file_out.write(*_sol[field]['forward'][_t].subfunctions)
+
+
+    def _output_adjoint(self, mesh_seq, file_out, field= None):
+        """
+        Output forward solution to vtk, either for steady or unsteady
+        sets the output file and writes to it
+        """
+
+        _sol_obj =  mesh_seq.solutions.extract(layout='subinterval')
+
+        
+        assert all([True for _sol in _sol_obj if _sol[field]["adjoint"]]),\
+        f"issue with forward solution field"
+
+        for _sol in _sol_obj:
+            for _t in range(np.shape(_sol[field]["adjoint"])[0]):
+                # u.rename(name = 'elev_2d')
+                # uv.rename(name = 'uv_2d')
+                file_out.write(*_sol[field]['adjoint'][_t].subfunctions)
+
+    def _output_metric():
+        
+
+
 
 
 class Adaptor:
@@ -50,18 +669,7 @@ class Adaptor:
         self.boundary_labels={}
         self.local_filepath=None
        
-    def set_outfolder(self, suffix=""):
-        # TODO: fix to only create file if actually output
 
-        self.local_filepath = f"{self.filepath}/{self.params['adaptor_method']}_{suffix}"
-        if  not os.path.isdir(self.local_filepath):
-            os.makedirs(self.local_filepath) 
-        
-        # temporarily set this as the current working directory
-        os.chdir(self.local_filepath)
-
-        # QC:
-        print(f'current working directory changed to: {self.local_filepath}')
         
     def update_method(self, method = None):
         if method is not None:
@@ -454,62 +1062,6 @@ class Adaptor:
 
             return features
         
-    #TODO: refactor output statments to be more pythonic - 
-
-    # def _output_selection(output="forward", format="vtk", **kwargs):
-    #     function_options = {
-    #         "forward": ,
-    #         "adjoint": ,
-    #         "metric": ,
-    #         "hessian": ,
-    #         "indicator": ,
-    #     }
-    #     try:
-    #         return function_options[output](output, format, **kwargs)
-    #     except KeyError as e:
-    #         raise ValueError(f"OUtput '{output}' not currently supported.") from e
-        
-    # def _output_function(self, output, field= None):
-    #     """
-    #     Output function to vtk, either for steady or unsteady
-    #     sets the output file and writes to it
-    #     """
-
-    #     # to write to local folder
-    #     vtk_folder = f"{self.local_filepath}/vtk_files_fpi{self.adapt_iteration}"
-
-    #     file_out = None
-    #     if field is None:
-    #         field = self.params["field"]
-
-    #     # output the function
-    #     if file_out is None:
-    #         file_out= VTKFile(f"{vtk_folder}/{output}.pvd")
-
-
-    # def _check_output_for(sol_obj):
-    #     """
-    #     check that forward solution exists in the solution object for all solutions
-    #     """
-
-    #     if sol_obj:
-    #         for _sol in _sol_obj:
-    #             # output forward solutions
-    #             if _sol[field]["forward"]:
-
-    # def _output_for(field):
-    #     """
-    #     gets forward solution and interates for vtk output
-    #     """
-    #     # get field
-    #     _sol_obj =  mesh_seq.solutions.extract(layout='subinterval')
-
-    #     # if the list evaluates to true
-    #     if _check_output_for():
-    #         for _t in range(np.shape(_sol[field]["forward"])[0]):
-    #             return _sol[field]['forward'][_t].subfunctions
-    #             # self.f_out.write(*_sol[field]['forward'][_t].subfunctions)
-
 
     def output_vtk_for(self, mesh_seq, field = None, ):
 

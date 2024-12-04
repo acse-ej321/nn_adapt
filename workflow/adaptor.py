@@ -52,6 +52,7 @@ class Adaptor_B(metaclass =abc.ABCMeta):
     def __init__(self, **kwargs):
         self.field = kwargs.get("field")
         self.local_filepath = kwargs.get("local_filepath")
+        self.adaptor_method = kwargs.get("adaptor_method")
         self.adapt_iteration = 0
         self.qois = []
         self.mesh_stats = []
@@ -69,16 +70,10 @@ class Adaptor_B(metaclass =abc.ABCMeta):
     def _output_selection(self, output_list=list, mesh_seq = None, format="vtk", **kwargs):
         
         output_options = self._output_options()
-
-        # to write to local folder
         vtk_folder = f"vtk_files_fpi{self.adapt_iteration}"
 
-
-
         for output in output_list:
-
             file_out= VTKFile(f"{vtk_folder}/{output}.pvd")
-                
             try:
                 output_options[output](file_out,mesh_seq=mesh_seq, **kwargs)
                 print(f"output item - {output}")
@@ -95,7 +90,6 @@ class Adaptor_B(metaclass =abc.ABCMeta):
         assert self.field, f"field value must be set"
         assert mesh_seq, f"MeshSeq object is not set"
         _sol_obj =  mesh_seq.solutions.extract(layout='subinterval')
-
 
         assert all([True for _sol in _sol_obj if _sol[self.field]["forward"]]),\
         f"issue with forward solution field"
@@ -114,7 +108,6 @@ class Adaptor_B(metaclass =abc.ABCMeta):
         assert self.field, f"field value must be set"
         assert mesh_seq, f"MeshSeq object is not set"
         _sol_obj =  mesh_seq.solutions.extract(layout='subinterval')
-
 
         assert all([True for _sol in _sol_obj if _sol[self.field]["adjoint"]]),\
         f"issue with adjoint solution field"
@@ -241,6 +234,123 @@ class Adaptor_B(metaclass =abc.ABCMeta):
         if show:
             plt.show()
 
+
+    def _mesh_stats(self, mesh_seq):
+            """
+            extract general mesh statistics for output
+            TODO: currently only works for one mesh steady state only
+            """
+            gen_stats={}
+            # gen_stats["params"]=self.params # not currently passed
+            gen_stats["mesh_id"] = 0
+            gen_stats["fp_iteration"] = mesh_seq.fp_iteration
+
+            gen_stats["dof"]=sum(np.array([
+                mesh_seq.solutions[self.field]['forward'][0][0]
+                .function_space().dof_count
+                ]).flatten())
+
+            _mesh_stats = self.dict_mesh_stats(mesh_seq) 
+            for _key,_value in _mesh_stats.items():
+                gen_stats[_key]=_value[0]
+
+            return gen_stats
+    
+    def _mesh_features(self, mesh_seq):
+        """
+        extract some derivative parameters from the mesh
+        TODO: currently only works for one mesh steady state only
+        """
+        fwd_sol = mesh_seq.solutions[self.field]['forward'][0][0]
+        try:
+            d, h1, h2, bnd = extract_mesh_features(fwd_sol)
+
+            features = {
+                "mesh_d": d,
+                "mesh_h1": h1,
+                "mesh_h2": h2,
+                "mesh_bnd": bnd,
+                "cell_info": get_mesh_info(fwd_sol), # ej321 added
+            }
+        except:
+            print(f'issue with mesh stats exporting features')
+            features = {}
+
+        return features
+
+    def _model_features(self, mesh_seq):
+        """
+        return model parameters extracted from the mesh solve
+        TODO: currently only works for one mesh steady state only
+        """
+        features = {}
+        try:
+            for _key,_value in mesh_seq.model_features.items():
+                # print(f'in feature output: {_key,_value}')
+                features[_key] = _value
+        except:
+            print("Issue with accessing model features on Model object - did you mean to define?")
+
+        return features
+
+
+    def _field_features(self, mesh_seq):
+        """
+        return field related feature parameters
+        TODO: currently only works for one mesh steady state only
+        """
+        features = {}
+        features["forward_dofs"]={}
+        fwd_sol = mesh_seq.solutions[self.field]['forward'][0][0]
+        for _t in range(np.shape(mesh_seq.solutions[self.field]['forward'][0])[0]):
+                it_sol = _t * mesh_seq.time_partition.num_timesteps_per_export[0] * mesh_seq.time_partition.timesteps[0]
+                it_sol = str(round(it_sol,2))
+                print(it_sol)
+                
+                features["forward_dofs"][it_sol] = extract_array(
+                    mesh_seq.solutions[self.field]['forward'][0][_t],centroid=True) 
+
+        # if adjoint run - extract adjoint and estimator
+        if 'adjoint' in mesh_seq.solutions[self.field]:
+            try:
+                adj_sol = mesh_seq.solutions[self.field]['adjoint'][0][0]
+                # print(f'EJ321 - adj in feature export {adj_sol}')
+                features["adjoint_dofs"] = extract_array(adj_sol, centroid=True)
+                # print(f'EJ321 - adj in adj_dofs {features["adjoint_dofs"]}')
+                features["estimator_coarse"] = extract_coarse_dwr_features(mesh_seq, fwd_sol, adj_sol, index=0)
+                # print(f'EJ321 - adj in estimator_coarse {features["estimator_coarse"]}')
+            except:
+                print(f'issue with extracting adjoint')
+        
+        return features
+
+    def _get_all_features(self, mesh_seq):
+        """
+        get all features for export
+        """
+        features = {}
+        features['gen_stats'] = self._mesh_stats(mesh_seq)
+        features.update(self._mesh_features(mesh_seq))
+        features.update(self._model_features(mesh_seq))
+        features.update(self._field_features(mesh_seq))
+
+        return features
+
+
+    def _export_features(self, mesh_seq, features):
+        """
+        export features for ML model input
+        TODO: currently only works for one mesh steady state only
+        """
+
+        output_file = f'{self.field}_{self.adaptor_method }\
+            mesh_0_{mesh_seq.fp_iteration}.pkl'
+
+        with open(
+            output_file,'wb') as pickle_file:
+                pickle.dump(features, pickle_file)
+
+
     def _get_initial_stats(self, mesh_seq):
         """
         append statistics to relavent lists
@@ -309,6 +419,9 @@ class Adaptor_B(metaclass =abc.ABCMeta):
 
     def adaptor(self, mesh_seq, solutions = None, indicators=None):
         self.adapt_iteration +=1
+        features = self._get_all_features(mesh_seq)
+        self._export_features(mesh_seq, features)
+        # TODO: output checkpoint file
         self._get_initial_stats(mesh_seq)
         self._output_selection(mesh_seq = mesh_seq, output_list=["forward",], format="vtk")
         self._calculate_metrics(mesh_seq)
@@ -519,6 +632,9 @@ class Adaptor_H(Adaptor_B):
             )
 
     def adaptor(self, mesh_seq, solutions = None, indicators=None):
+        self.adapt_iteration +=1
+        features = self._get_all_features(mesh_seq)
+        self._export_features(mesh_seq, features)
         self._get_initial_stats(mesh_seq)
         self._calculate_metrics(mesh_seq)
         self._output_selection(mesh_seq = mesh_seq,
@@ -535,6 +651,7 @@ class Adaptor_I(Adaptor_H):
     Isotropic class for Adaptors
     """
     def __init__(self, **kwargs):
+        self.indicator_method = kwargs.get("indicator_method")
 
         super().__init__(**kwargs)
 
@@ -565,6 +682,25 @@ class Adaptor_I(Adaptor_H):
             for _ind in _ind_obj:
                 for _t in range(np.shape(_ind[self.field])[0]):
                     file_out.write(*_ind[self.field][_t].subfunctions)
+
+
+    def _get_indicator(self, mesh_seq, features):
+        """
+        Get indicators
+        """
+
+        print(f"\n\n adaptor using: {self.adaptor_method} - { self.indicator_method }")
+        indicator_methods = {
+        "gnn": gnn_indicator_fit,
+        "gnn_noadj": gnn_noadj_indicator_fit,
+        "mlp": mlp_indicator_fit,
+        }
+        if self.indicator_method in indicator_methods:
+             mesh_seq.indicators[self.field][0][0]= indicator_methods[self.indicator_method](
+                 features, mesh_seq.meshes[-1])
+             
+        else:
+            print(f'ML indicator method not selected')
 
     def _calculate_metrics(self, mesh_seq):
 
@@ -631,6 +767,10 @@ class Adaptor_I(Adaptor_H):
 
         # OUTPUT TO VTK - CALLBACK? or in adaptor?
     def adaptor(self, mesh_seq, solutions = None, indicators=None):
+        self.adapt_iteration +=1
+        features = self._get_all_features(mesh_seq)
+        self._export_features(mesh_seq, features)
+        self._get_indicator(mesh_seq, features)
         self._get_initial_stats(mesh_seq)
         self._calculate_metrics(mesh_seq)
         self._output_selection(mesh_seq = mesh_seq,

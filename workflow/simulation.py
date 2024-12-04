@@ -150,7 +150,7 @@ class Simulation():
             )
         
         # # call instance of adaptor
-        adaptor = AdaptorSelection(method = adaptor_method, **self.params)
+        adaptor = AdaptorSelection(adaptor_method, **self.params)
 
 
         if "hessian" in self.params["adaptor_method"] or "uniform" in self.params["adaptor_method"]:
@@ -163,10 +163,10 @@ class Simulation():
                 adaptor.adaptor,
                 parameters = self.params   
             )
-            
+
         # if ML method need which needs adjoint
         elif  self.params["indicator_method"] in ["gnn","mlp","gnn_noadj",]:
-            print('Adjoint solver')
+            print('\n\n\n\n\t\t\tAdjoint solver')
             gol_adj.AdjointMeshSeq.fixed_point_iteration( 
                 mesh_seq, 
                 adaptor.adaptor,

@@ -163,6 +163,7 @@ class Simulation():
                 adaptor.adaptor,
                 parameters = self.params   
             )
+            
         # if ML method need which needs adjoint
         elif  self.params["indicator_method"] in ["gnn","mlp","gnn_noadj",]:
             print('Adjoint solver')

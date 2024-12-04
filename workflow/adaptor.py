@@ -45,27 +45,87 @@ def AdaptorSelection(method = "uniform", **kwargs):
     except KeyError as e:
         raise ValueError(f"Method '{method}' not recognised.") from e
 
-# self.target_complexities
-# self.metrics
-# self.hessians
-
-
-# # paramters
-# self.label='forward'
-# field = mesh_seq.params["field"]
-# solutions = mesh_seq.solutions
-# iteration = mesh_seq.fp_iteration
-# base =mesh_seq.params["base"]
-# target = mesh_seq.params["target"]
-# miniter = mesh_seq.params["miniter"]
 class Adaptor_B(metaclass =abc.ABCMeta):
     """
     Base class for Adaptors
     """
     def __init__(self, **kwargs):
+        self.field = kwargs.get("field")
+        self.local_filepath = kwargs.get("local_filepath")
+        self.adapt_iteration = 0
         self.qois = []
         self.mesh_stats = []
     
+
+    def _output_options(self):
+        """
+        Return a dictionary of options for file outputs
+        """
+        return {
+            "forward": self._output_forward,
+            "adjoint": self._output_adjoint,
+        }
+
+    def _output_selection(self, output_list=list, mesh_seq = None, format="vtk", **kwargs):
+        
+        output_options = self._output_options()
+
+        # to write to local folder
+        vtk_folder = f"vtk_files_fpi{self.adapt_iteration}"
+
+
+
+        for output in output_list:
+
+            file_out= VTKFile(f"{vtk_folder}/{output}.pvd")
+                
+            try:
+                output_options[output](file_out,mesh_seq=mesh_seq, **kwargs)
+                print(f"output item - {output}")
+            except KeyError as e:
+                raise ValueError(f"Output '{output}' not currently defined.") from e
+
+
+    def _output_forward(self, file_out, mesh_seq):
+        """
+        Output forward solution to vtk, either for steady or unsteady
+        sets the output file and writes to it
+        """
+
+        assert self.field, f"field value must be set"
+        assert mesh_seq, f"MeshSeq object is not set"
+        _sol_obj =  mesh_seq.solutions.extract(layout='subinterval')
+
+
+        assert all([True for _sol in _sol_obj if _sol[self.field]["forward"]]),\
+        f"issue with forward solution field"
+
+        for _sol in _sol_obj:
+            for _t in range(np.shape(_sol[self.field]["forward"])[0]):
+                file_out.write(*_sol[self.field]['forward'][_t].subfunctions)
+
+
+    def _output_adjoint(self, file_out, mesh_seq):
+        """
+        Output adjoint solution to vtk, either for steady or unsteady
+        sets the output file and writes to it
+        """
+
+        assert self.field, f"field value must be set"
+        assert mesh_seq, f"MeshSeq object is not set"
+        _sol_obj =  mesh_seq.solutions.extract(layout='subinterval')
+
+
+        assert all([True for _sol in _sol_obj if _sol[self.field]["adjoint"]]),\
+        f"issue with adjoint solution field"
+
+        for _sol in _sol_obj:
+            for _t in range(np.shape(_sol[self.field]["adjoint"])[0]):
+                # u.rename(name = 'elev_2d')
+                # uv.rename(name = 'uv_2d')
+                file_out.write(*_sol[self.field]['adjoint'][_t].subfunctions)
+
+
     def dict_mesh_stats(self, mesh_seq):
         """
         Computes and returns a dictionary containing statistics for each mesh in the sequence.
@@ -248,7 +308,9 @@ class Adaptor_B(metaclass =abc.ABCMeta):
             )
 
     def adaptor(self, mesh_seq, solutions = None, indicators=None):
+        self.adapt_iteration +=1
         self._get_initial_stats(mesh_seq)
+        self._output_selection(mesh_seq = mesh_seq, output_list=["forward",], format="vtk")
         self._calculate_metrics(mesh_seq)
         self._adapt_meshes(mesh_seq)
         self._adaptor_info(mesh_seq)
@@ -260,7 +322,6 @@ class Adaptor_H(Adaptor_B):
     Hessian class for Adaptors
     """
     def __init__(self, **kwargs):
-        self.field = kwargs.get("field")
         self.miniter = kwargs.get("miniter")
         self.maxiter = kwargs.get("maxiter")
         self.base_complexity = kwargs.get("base")
@@ -273,6 +334,47 @@ class Adaptor_H(Adaptor_B):
         self.hessians=[]
         self.metrics=[]
         super().__init__(**kwargs)
+
+
+    def _output_options(self):
+        """
+        Return a dictionary of options for file outputs
+        """
+        return {
+            "forward": self._output_forward,
+            "adjoint": self._output_adjoint,
+            "hessian": self._output_hessian,
+            "metric": self._output_metric
+        }
+
+    def _output_hessian(self, file_out, **kwargs):
+        """
+        Output hessian to vtk, either for steady or unsteady
+        sets the output file and writes to it
+        """
+
+        assert self.hessians, f"issue with adjoint solution field"
+
+        #TODO: add check hessian and mesh_seq are consistent
+
+        for _hes in self.hessians:
+            _hes.rename(f'hessian')
+            file_out.write(*_hes.subfunctions)
+
+
+    def _output_metric(self, file_out, **kwargs):
+        """
+        Output metric to vtk, either for steady or unsteady
+        sets the output file and writes to it
+        """
+
+        assert self.metrics, f"issue with adjoint solution field"
+        
+        #TODO: add check metric and mesh_seq are consistent
+
+        for _met in self.metrics:
+            _met.rename(f'metric')
+            file_out.write(*_met.subfunctions)
 
     def _set_ramp_complexity(self):
         """
@@ -419,6 +521,8 @@ class Adaptor_H(Adaptor_B):
     def adaptor(self, mesh_seq, solutions = None, indicators=None):
         self._get_initial_stats(mesh_seq)
         self._calculate_metrics(mesh_seq)
+        self._output_selection(mesh_seq = mesh_seq,
+                               output_list=["forward","hessian","metric"], format="vtk")
         self._adapt_meshes(mesh_seq)
         self._adaptor_info(mesh_seq)
 
@@ -433,6 +537,34 @@ class Adaptor_I(Adaptor_H):
     def __init__(self, **kwargs):
 
         super().__init__(**kwargs)
+
+    def _output_options(self):
+        """
+        Return a dictionary of options for file outputs
+        """
+        return {
+            "forward": self._output_forward,
+            "adjoint": self._output_adjoint,
+            "indicator": self._output_indicator,
+            "hessian": self._output_hessian,
+            "metric": self._output_metric
+        }
+    
+    def _output_indicator(self, file_out, mesh_seq):
+        """
+        Output indicator field to vtk, either for steady or unsteady
+        sets the output file and writes to it
+        """
+
+        assert self.field, f"field value must be set"
+        assert mesh_seq, f"MeshSeq object is not set"
+
+        _ind_obj = mesh_seq.indicators.extract(layout='subinterval')
+        if _ind_obj:
+            # output the indicator function
+            for _ind in _ind_obj:
+                for _t in range(np.shape(_ind[self.field])[0]):
+                    file_out.write(*_ind[self.field][_t].subfunctions)
 
     def _calculate_metrics(self, mesh_seq):
 
@@ -497,10 +629,21 @@ class Adaptor_I(Adaptor_H):
             # metrics.append(metric)
             self.metrics.append(metric)
 
-            # OUTPUT TO VTK - CALLBACK? or in adaptor?
+        # OUTPUT TO VTK - CALLBACK? or in adaptor?
+    def adaptor(self, mesh_seq, solutions = None, indicators=None):
+        self._get_initial_stats(mesh_seq)
+        self._calculate_metrics(mesh_seq)
+        self._output_selection(mesh_seq = mesh_seq,
+                            output_list=["forward", "adjoint","indicator","hessian","metric"], format="vtk")
+        self._adapt_meshes(mesh_seq)
+        self._adaptor_info(mesh_seq)
+
+        # check if the target complexity has been (approximately) reached on each subinterval
+        continue_unconditionally = np.array(self.complexities) < 0.90 * self.target_complexity
+        return continue_unconditionally
 
 
-class Adaptor_A(Adaptor_H):
+class Adaptor_A(Adaptor_I):
     """
     Anisotropic class for Adaptors
     """
@@ -578,75 +721,7 @@ class Adaptor_A(Adaptor_H):
 
 
             # OUTPUT TO VTK - CALLBACK? or in adaptor?
-
-
-
-
-    # def _output_selection(output="forward", format="vtk", **kwargs):
-    #     function_options = {
-    #         "forward": _output_forward,
-    #         "adjoint": ,
-    #         "metric": ,
-    #         "hessian": ,
-    #         "indicator": ,
-    #     }
-
-    #     # to write to local folder
-    #     vtk_folder = f"{self.local_filepath}/vtk_files_fpi{self.adapt_iteration}"
-
-    #     file_out = None
-    #     if field is None:
-    #         field = self.params["field"]
-
-    #     # output the function
-    #     if file_out is None:
-    #         file_out= VTKFile(f"{vtk_folder}/{output}.pvd")
-    #     try:
-    #         return function_options[output](output, file_out, field = None, **kwargs)
-    #     except KeyError as e:
-    #         raise ValueError(f"OUtput '{output}' not currently supported.") from e
-
-
-    # def _output_forward(self, mesh_seq, file_out, field= None):
-    #     """
-    #     Output forward solution to vtk, either for steady or unsteady
-    #     sets the output file and writes to it
-    #     """
-
-    #     _sol_obj =  mesh_seq.solutions.extract(layout='subinterval')
-
-        
-    #     assert all([True for _sol in _sol_obj if _sol[field]["forward"]]),\
-    #     f"issue with forward solution field"
-
-    #     for _sol in _sol_obj:
-    #         for _t in range(np.shape(_sol[field]["forward"])[0]):
-    #             file_out.write(*_sol[field]['forward'][_t].subfunctions)
-
-
-    # def _output_adjoint(self, mesh_seq, file_out, field= None):
-    #     """
-    #     Output forward solution to vtk, either for steady or unsteady
-    #     sets the output file and writes to it
-    #     """
-
-    #     _sol_obj =  mesh_seq.solutions.extract(layout='subinterval')
-
-        
-    #     assert all([True for _sol in _sol_obj if _sol[field]["adjoint"]]),\
-    #     f"issue with forward solution field"
-
-    #     for _sol in _sol_obj:
-    #         for _t in range(np.shape(_sol[field]["adjoint"])[0]):
-    #             # u.rename(name = 'elev_2d')
-    #             # uv.rename(name = 'uv_2d')
-    #             file_out.write(*_sol[field]['adjoint'][_t].subfunctions)
-
-    # def _output_metric():
-        
-
-
-
+    
 
 class Adaptor:
 

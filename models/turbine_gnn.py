@@ -21,6 +21,11 @@ import os
 
 
 def get_parameters_from_json(filepath):
+    """
+    load parameter file from json file - this in not ideal
+    but a work around to pass parameters not allowed through the
+    Goalie API currently.
+    """
     if os.path.exists(filepath):
         with open(filepath, 'r') as fp:
             params = json.load(fp)
@@ -861,14 +866,15 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
 
         def qoi():
             thetis_obj=self.manage_thetis_object(self[i])          
-        
+            rho = fd.Constant(self.params["density"])
             return sum([
-            farm.turbine.power(thetis_obj.callbacks['export']['turbine'].uv,
-                                thetis_obj.callbacks['export']['turbine'].depth)
+            farm.turbine.power(thetis_obj.callbacks['export']['turbine'].uv, 
+                               thetis_obj.callbacks['export']['turbine'].depth)
              * farm.turbine_density
-             *fd.Constant(0.001)
-             * farm.dx
-            for farm in thetis_obj.callbacks['export']['turbine'].farms])
+            #  *fd.Constant(0.001) # convert to MW
+            * rho # consistency with Joe's code
+             * fd.dx
+            for farm in thetis_obj.callbacks['export']['turbine'].farms]) 
 
         return qoi
 

@@ -15,6 +15,7 @@ for speed in [5,-5]:
                 }
 ## UNIFORM --------------------------------------------------------------
     # rootfolder = f"/data0/nn_adapt/output/Nov2024_gnn_test/target_4000/offset/reverse/speed_{str(speed)}/uniform"
+    # rootfolder = f"/home/phd01/nn_adapt/output/Nov2024_gnn_test/target_4000/offset/reverse/speed_{str(speed)}/uniform"
 
     # sim_uniform = Simulation(Model,rootfolder, parameters = input_params)
 
@@ -29,23 +30,24 @@ for speed in [5,-5]:
 
     # logging.info(sim_uniform.params)
     # sim_uniform.run_simulation()
-    # # sim_uniform.run_fp_loop() 
+    # sim_uniform.run_fp_loop() 
 
 # # BASE - HESSIAN --------------------------------------------------------------
-    rootfolder = f"/data0/nn_adapt/output/Nov2024_gnn_test/target_4000/offset/reverse/speed_{str(speed)}/hessian"
+    # rootfolder = f"/data0/nn_adapt/output/Nov2024_gnn_test/target_4000/offset/reverse/speed_{str(speed)}/hessian"
+    # rootfolder = f"/home/phd01/nn_adapt/output/Nov2024_gnn_test/target_4000/offset/reverse/speed_{str(speed)}/hessian"
 
-    sim_uniform = Simulation(Model,rootfolder, parameters = input_params)
-    sim_uniform.params["adaptor_method"] = 'hessian'
-    sim_uniform.params["indicator_method"] = "none"
-    print(f'\n\nmethod: {sim_uniform.params["adaptor_method"] }, {sim_uniform.params["indicator_method"]} ')
+    # sim_uniform = Simulation(Model,rootfolder, parameters = input_params)
+    # sim_uniform.params["adaptor_method"] = 'hessian'
+    # sim_uniform.params["indicator_method"] = "none"
+    # print(f'\n\nmethod: {sim_uniform.params["adaptor_method"] }, {sim_uniform.params["indicator_method"]} ')
 
-    sim_uniform.params['miniter'] = 3
-    sim_uniform.params['maxiter'] = 14
-    sim_uniform.params["base"]= base_complexity # changed from 200
-    sim_uniform.params["target"]= target_complexity
+    # sim_uniform.params['miniter'] = 3
+    # sim_uniform.params['maxiter'] = 14
+    # sim_uniform.params["base"]= base_complexity # changed from 200
+    # sim_uniform.params["target"]= target_complexity
 
-    logging.info(sim_uniform.params)
-    sim_uniform.run_simulation()
+    # logging.info(sim_uniform.params)
+    # sim_uniform.run_simulation()
     # sim_uniform.run_fp_loop() 
 
 
@@ -53,9 +55,10 @@ for speed in [5,-5]:
 
     # rootfolder = f"/data0/nn_adapt/output/Nov2024_gnn_test/target_4000/offset/viscosity_{str(vis)}/goal_based"
     # rootfolder = f"/data0/nn_adapt/output/Nov2024_gnn_test/target_4000/offset/reverse/speed_{str(speed)}/goal_based"
+    # rootfolder = f"/home/phd01/nn_adapt/output/Nov2024_gnn_test/target_4000/offset/reverse/speed_{str(speed)}/goal_based"
 
     # sim_uniform = Simulation(Model, rootfolder, parameters = input_params)
-    # sim_uniform.params["adaptor_method"] = 'steady_isotropic'
+    # sim_uniform.params["adaptor_method"] = 'isotropic'
     # sim_uniform.params["indicator_method"] = "none"
     # print(f'\n\nmethod: {sim_uniform.params["adaptor_method"] }, {sim_uniform.params["indicator_method"]} ')
 
@@ -72,18 +75,20 @@ for speed in [5,-5]:
 
     # rootfolder = f"/data0/nn_adapt/output/Nov2024_gnn_test/target_4000/offset/viscosity_{str(vis)}/goal_based"
     # rootfolder = f"/data0/nn_adapt/output/Nov2024_gnn_test/target_4000/offset/reverse/speed_{str(speed)}/goal_based"
+    rootfolder = f"/home/phd01/nn_adapt/output/Nov2024_gnn_test/target_4000/offset/reverse/speed_{str(speed)}/goal_based"
 
-    # sim_uniform = Simulation(Model, rootfolder, parameters = input_params)
-    # sim_uniform.params["adaptor_method"] = 'steady_anisotropic'
-    # sim_uniform.params["indicator_method"] = "none"
-    # print(f'\n\nmethod: {sim_uniform.params["adaptor_method"] }, {sim_uniform.params["indicator_method"]} ')
+    sim_uniform = Simulation(Model, rootfolder, parameters = input_params)
+    sim_uniform.params["adaptor_method"] = 'anisotropic'
+    sim_uniform.params["indicator_method"] = "none"
+    print(f'\n\nmethod: {sim_uniform.params["adaptor_method"] }, {sim_uniform.params["indicator_method"]} ')
 
-    # sim_uniform.params['miniter'] = 3
-    # sim_uniform.params['maxiter'] = 14
-    # sim_uniform.params["base"]= base_complexity # changed from 200
-    # sim_uniform.params["target"]= target_complexity
+    sim_uniform.params['miniter'] = 3
+    sim_uniform.params['maxiter'] = 14
+    sim_uniform.params["base"]= base_complexity # changed from 200
+    sim_uniform.params["target"]= target_complexity
 
-    # logging.info(sim_uniform.params)
+    logging.info(sim_uniform.params)
+    sim_uniform.run_simulation()
     # sim_uniform.run_fp_loop() 
 
 # ## MLP - GO ANISOTROPIC -  - ------------------------------------------------------------

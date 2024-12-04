@@ -199,8 +199,8 @@ class Simulation():
     def run_fp_loop(self):
 
         # set output folder with current date
-        self.adaptor.set_outfolder(f'{datetime.now().strftime("%H%M%S")}')
-        self.setup_logging_file(self.adaptor.local_filepath)
+        self.set_outfolder(f'{datetime.now().strftime("%H%M%S")}')
+        self.setup_logging_file(self.local_filepath)
         logging.info(f'\n################################################')
         logging.info(f'\n\tFIXED_POINT_ITERATION_FOLDER: {os.getcwd()}')
         logging.info(f'\n parameters: {self.params}')

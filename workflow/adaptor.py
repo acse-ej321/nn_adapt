@@ -194,7 +194,7 @@ class Adaptor_B(metaclass =abc.ABCMeta):
         
         # log stats
         logging.info(f'qoi: {self.qois[-1]}')
-        logging.info(f'mesh_stats: {self.qois[-1]}')
+        logging.info(f'mesh_stats: {self.mesh_stats[-1]}')
 
         # other:
 
@@ -582,67 +582,67 @@ class Adaptor_A(Adaptor_H):
 
 
 
-    def _output_selection(output="forward", format="vtk", **kwargs):
-        function_options = {
-            "forward": _output_forward,
-            "adjoint": ,
-            "metric": ,
-            "hessian": ,
-            "indicator": ,
-        }
+    # def _output_selection(output="forward", format="vtk", **kwargs):
+    #     function_options = {
+    #         "forward": _output_forward,
+    #         "adjoint": ,
+    #         "metric": ,
+    #         "hessian": ,
+    #         "indicator": ,
+    #     }
 
-        # to write to local folder
-        vtk_folder = f"{self.local_filepath}/vtk_files_fpi{self.adapt_iteration}"
+    #     # to write to local folder
+    #     vtk_folder = f"{self.local_filepath}/vtk_files_fpi{self.adapt_iteration}"
 
-        file_out = None
-        if field is None:
-            field = self.params["field"]
+    #     file_out = None
+    #     if field is None:
+    #         field = self.params["field"]
 
-        # output the function
-        if file_out is None:
-            file_out= VTKFile(f"{vtk_folder}/{output}.pvd")
-        try:
-            return function_options[output](output, file_out, field = None, **kwargs)
-        except KeyError as e:
-            raise ValueError(f"OUtput '{output}' not currently supported.") from e
-
-
-    def _output_forward(self, mesh_seq, file_out, field= None):
-        """
-        Output forward solution to vtk, either for steady or unsteady
-        sets the output file and writes to it
-        """
-
-        _sol_obj =  mesh_seq.solutions.extract(layout='subinterval')
-
-        
-        assert all([True for _sol in _sol_obj if _sol[field]["forward"]]),\
-        f"issue with forward solution field"
-
-        for _sol in _sol_obj:
-            for _t in range(np.shape(_sol[field]["forward"])[0]):
-                file_out.write(*_sol[field]['forward'][_t].subfunctions)
+    #     # output the function
+    #     if file_out is None:
+    #         file_out= VTKFile(f"{vtk_folder}/{output}.pvd")
+    #     try:
+    #         return function_options[output](output, file_out, field = None, **kwargs)
+    #     except KeyError as e:
+    #         raise ValueError(f"OUtput '{output}' not currently supported.") from e
 
 
-    def _output_adjoint(self, mesh_seq, file_out, field= None):
-        """
-        Output forward solution to vtk, either for steady or unsteady
-        sets the output file and writes to it
-        """
+    # def _output_forward(self, mesh_seq, file_out, field= None):
+    #     """
+    #     Output forward solution to vtk, either for steady or unsteady
+    #     sets the output file and writes to it
+    #     """
 
-        _sol_obj =  mesh_seq.solutions.extract(layout='subinterval')
+    #     _sol_obj =  mesh_seq.solutions.extract(layout='subinterval')
 
         
-        assert all([True for _sol in _sol_obj if _sol[field]["adjoint"]]),\
-        f"issue with forward solution field"
+    #     assert all([True for _sol in _sol_obj if _sol[field]["forward"]]),\
+    #     f"issue with forward solution field"
 
-        for _sol in _sol_obj:
-            for _t in range(np.shape(_sol[field]["adjoint"])[0]):
-                # u.rename(name = 'elev_2d')
-                # uv.rename(name = 'uv_2d')
-                file_out.write(*_sol[field]['adjoint'][_t].subfunctions)
+    #     for _sol in _sol_obj:
+    #         for _t in range(np.shape(_sol[field]["forward"])[0]):
+    #             file_out.write(*_sol[field]['forward'][_t].subfunctions)
 
-    def _output_metric():
+
+    # def _output_adjoint(self, mesh_seq, file_out, field= None):
+    #     """
+    #     Output forward solution to vtk, either for steady or unsteady
+    #     sets the output file and writes to it
+    #     """
+
+    #     _sol_obj =  mesh_seq.solutions.extract(layout='subinterval')
+
+        
+    #     assert all([True for _sol in _sol_obj if _sol[field]["adjoint"]]),\
+    #     f"issue with forward solution field"
+
+    #     for _sol in _sol_obj:
+    #         for _t in range(np.shape(_sol[field]["adjoint"])[0]):
+    #             # u.rename(name = 'elev_2d')
+    #             # uv.rename(name = 'uv_2d')
+    #             file_out.write(*_sol[field]['adjoint'][_t].subfunctions)
+
+    # def _output_metric():
         
 
 

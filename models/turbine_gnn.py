@@ -5,6 +5,7 @@ import numpy as np
 import goalie_adjoint as gol_adj # new sept23
 # from workflow.utility import *
 from workflow.features import * # ej321 - for feature extraction
+from models.bathymetry import BathymetrySelection
 
 import thetis as thetis
 import pygmsh
@@ -63,8 +64,16 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
                 # qoi kwargs
                 "qoi_name":"power output",
                 "qoi_unit":"MW",
+
+                # mesh kwargs
+                "domain_length": 1200,
+                "domain_width": 500,
+                "dx_inner": 20,
+                "dx_outer":20,
+
                 # simulation kwargs
                 "output_directory":'outputs_nn_adapt', # for thetis
+                "bathymetry_model":"constant",
                 "viscosity_coefficient":0.5,
                 "depth": 40.0,
                 "drag_coefficient":0.0025,
@@ -127,6 +136,12 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
         local_path= 'data0'
         local_folder = 'nn_adapt/models/inputs'
 
+        num_meshes = kwargs.get('num_meshes',1)
+        L = kwargs.get('domain_length',1200)
+        W= kwargs.get('domain_width',500)
+        dx_inner = kwargs.get('dx_inner',20)
+        dx_outer = kwargs.get('dx_outer',20)
+
         # pc: 
         # local_path = 'home/phd01'
         # local_folder = 'adaptwkflw/models/inputs'
@@ -138,7 +153,10 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
         # mesh = TurbineMeshSeq.create_turbine_mesh()
 
         # create new mesh
-        meshpath = TurbineMeshSeq.create_turbine_mesh(filepath)
+        meshpath = TurbineMeshSeq.create_turbine_mesh(filepath,
+                                                      L = L, W = W, 
+                                                      dx_inner = dx_inner,
+                                                      dx_outer = dx_outer)
 
 
         def create_default_meshes(num_meshes,**kwargs):
@@ -214,9 +232,12 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
         return rec_list
 
     @staticmethod
-    def create_turbine_mesh(meshpath, filename="inital_turbine_mesh.msh", m=0, L=1200.,W=500.,D=18., z=0., 
+    def create_turbine_mesh(meshpath, filename="inital_turbine_mesh.msh", m=0, L=1200.,W=500.,
+                            D=18., z=0., 
                             dx_inner=20.,dx_outer=20., n_min=1, n_max=8):
         
+        print(f'IN CREATE MESH : L {L} W {W}')
+
         dim=2 #2D
         algorithm=8 #same as Joes E2N paper
         
@@ -484,6 +505,8 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
         """
         Compute the bathymetry field on the current `mesh`.
         """
+
+        return BathymetrySelection(self.params['bathymetry_model'], mesh, **self.params)
         # NOTE: We assume a constant bathymetry field
         depth =self.params['depth']
         P0_2d = thetis.get_functionspace(mesh, "DG", 0)

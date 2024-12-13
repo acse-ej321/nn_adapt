@@ -5,14 +5,13 @@ import numpy as np
 import goalie_adjoint as gol_adj # new sept23
 # from workflow.utility import *
 from workflow.features import * # ej321 - for feature extraction
+from workflow.timer import Timer
 from models.bathymetry import BathymetrySelection
 
 import thetis as thetis
 import pygmsh
 import gmsh
 
-from collections import OrderedDict
-from time import perf_counter
 import logging
 import json
 
@@ -749,58 +748,50 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
 
     #     return bcs
 
-
     def get_solver(self):
 
         # def solver(index, ic):
+        
         def solver(index):
             # print(f'\n\nEJ CHECK solver called')
 
-            # timer start:
-            duration = -perf_counter() # ej321 - TIMING
+            with Timer(logger = logging.info, text="solve - forward solve, time taken: {:.6f}"):
 
-            field=self.params["field"]
+
+                field=self.params["field"]
             # thetis_obj=self.get_flowsolver2d(self[index], ic[field])
 
-            thetis_obj=self.manage_thetis_object(self[index])
-            thetis_obj.simulation_time=0.
+                thetis_obj=self.manage_thetis_object(self[index])
+                thetis_obj.simulation_time=0.
 
-            # Assign initial condition
-            # _sol, _sol_old = self.fields[field] # current, last/ic
-            _sol = self.fields[field] # current, last/ic
-            # c.assign(c_)
-            # thetis_obj.fields.solution_2d.assign(ic[field])
-            # thetis_obj.fields.solution_2d.assign(_sol_old)
+                # Assign initial condition
+                # _sol, _sol_old = self.fields[field] # current, last/ic
+                _sol = self.fields[field] # current, last/ic
+                # c.assign(c_)
+                # thetis_obj.fields.solution_2d.assign(ic[field])
+                # thetis_obj.fields.solution_2d.assign(_sol_old)
 
-            # Communicate variational form to mesh_seq
-            self.read_forms({field:thetis_obj.timestepper.F})
-            
+                # Communicate variational form to mesh_seq
+                self.read_forms({field:thetis_obj.timestepper.F})
+                
 
-            thetis_obj.fields.solution_2d.assign(_sol)
-            
+                thetis_obj.fields.solution_2d.assign(_sol)
+                
 
-            print(f"\n BEFORE ITERATE {thetis_obj.callbacks['export']['turbine'].integrated_power[0]}\n\n")
-            
-
-
-            iterate = thetis_obj.get_iterate()
-            # thetis_obj.iterate_ej321()
-
-            iterate()
-
-            _sol.assign(thetis_obj.fields.solution_2d)
-            
-            print(thetis_obj.callbacks['export']['turbine'].integrated_power[0])
-            solution = thetis_obj.fields.solution_2d
-            # ic[field]=solution
+                print(f"\n BEFORE ITERATE {thetis_obj.callbacks['export']['turbine'].integrated_power[0]}\n\n")
+                
 
 
+                iterate = thetis_obj.get_iterate()
+                # thetis_obj.iterate_ej321()
 
-            # timer end
-            duration += perf_counter() # ej321 - TIMING
-            # log time:
-            logging.info(f'TIMING, forward_solve, {duration:.6f}')  # ej321 - TIMING
-            print(f'forward_solve time taken: {duration:.6f} seconds')  # ej321 - TIMING
+                iterate()
+
+                _sol.assign(thetis_obj.fields.solution_2d)
+                
+                print(thetis_obj.callbacks['export']['turbine'].integrated_power[0])
+                solution = thetis_obj.fields.solution_2d
+                # ic[field]=solution
             
             # get model specific features
             self.get_model_features(self[index])

@@ -15,6 +15,7 @@ from firedrake.petsc import PETSc
 # timing functions manually:
 import logging
 from time import perf_counter
+from workflow.timer import Timer
 import json
 
 import shutil
@@ -79,13 +80,6 @@ class Simulation():
         self.params = create_params(Model, parameters)
         self.Model = Model
         self.local_filepath = None
-        # self.mesh_seq = Model(self.time_partition,
-        #                     self.initial_meshes, 
-        #                         qoi_type=self.params["qoi_type"],
-        #                         parameters=self.params # this is not split from mesh_seq, so passing for child class
-        #                         )
-
-        # self.adaptor=Adaptor(self.mesh_seq, self.params, filepath = self.filepath)
 
     def setup_logging_file(self, filepath):
         # need to remove logging handler explicity to switch filepath if one has
@@ -95,7 +89,7 @@ class Simulation():
         logging.basicConfig(
             level=logging.INFO, 
             filename=os.path.join(filepath,"timesout.txt"),
-            format=' %(asctime)s - %(levelname)s - %(message)s'
+            format='%(asctime)s - %(levelname)s - %(message)s'
             )
     
     def set_outfolder(self, suffix=""):
@@ -124,6 +118,7 @@ class Simulation():
 
 
     @PETSc.Log.EventDecorator("SIMULATION")
+    @Timer(logger = logging.info, text="full simulation, time taken: {:.6f}")
     def run_simulation(self):
 
         adaptor_method = self.params["adaptor_method"]
@@ -132,11 +127,8 @@ class Simulation():
         
         # setup logging
         self.setup_logging_file(self.local_filepath)
-        logging.info(f'\n\tOutput Folder: {os.getcwd()}')
-        logging.info(f'\n input parameters: {self.params}')
-
-        # timer start:
-        duration = -perf_counter()
+        logging.info(f'Output Folder: {os.getcwd()}')
+        logging.info(f'Input parameters: {self.params}')
 
         # run FPI
         # output parameters for init of mesh_seq
@@ -152,40 +144,40 @@ class Simulation():
         # # call instance of adaptor
         adaptor = AdaptorSelection(adaptor_method, **self.params)
 
+        with Timer(logger = logging.info, text="fixed point iteration loop, time taken: {:.6f}"):
 
-        if "hessian" in self.params["adaptor_method"] or "uniform" in self.params["adaptor_method"]:
-            
-            # calls the fixed point iteration from the MeshSeq parent class directly
-            # TODO: is this the best solution for this? Especially now that the 
-                # outputs of solution and/or indicator are saved on the MeshSeq object directly?
-            gol_adj.MeshSeq.fixed_point_iteration( 
-                mesh_seq, 
-                adaptor.adaptor,
-                parameters = self.params   
-            )
+            if "hessian" in self.params["adaptor_method"] or "uniform" in self.params["adaptor_method"]:
+                
+                # calls the fixed point iteration from the MeshSeq parent class directly
+                # TODO: is this the best solution for this? Especially now that the 
+                    # outputs of solution and/or indicator are saved on the MeshSeq object directly?
+                gol_adj.MeshSeq.fixed_point_iteration( 
+                    mesh_seq, 
+                    adaptor.adaptor,
+                    parameters = self.params   
+                )
 
-        # if ML method need which needs adjoint
-        elif  self.params["indicator_method"] in ["gnn","mlp","gnn_noadj",]:
-            print('\n\n\n\n\t\t\tAdjoint solver')
-            gol_adj.AdjointMeshSeq.fixed_point_iteration( 
-                mesh_seq, 
-                adaptor.adaptor,
-                parameters = self.params 
-            )
+            # if ML method need which needs adjoint
+            elif  self.params["indicator_method"] in ["gnn","mlp","gnn_noadj",]:
+                print('\n\n\n\n\t\t\tAdjoint solver')
+                gol_adj.AdjointMeshSeq.fixed_point_iteration( 
+                    mesh_seq, 
+                    adaptor.adaptor,
+                    parameters = self.params 
+                )
 
-        else:
-            mesh_seq.fixed_point_iteration( 
-                adaptor.adaptor,
-                enrichment_kwargs=self.params["enrichment_kwargs"],
-                # adaptor_kwargs=self.params["adaptor_kwargs"]
-                parameters = self.params  
-            )
+            else:
+                mesh_seq.fixed_point_iteration( 
+                    adaptor.adaptor,
+                    enrichment_kwargs=self.params["enrichment_kwargs"],
+                    # adaptor_kwargs=self.params["adaptor_kwargs"]
+                    parameters = self.params  
+                )
 
         # timer end
-        duration += perf_counter()
-        logging.info(f'fixed point iterator total time: {duration:.6f}')
+        # duration += perf_counter()
         logging.info(f'fixed point iterator total iterations: {len(adaptor.mesh_stats)}')
-        
+        # logging.info(f'fixed point iterator total time: {duration:.6f}')
         # QC plot for fixed point loop statistics:
         adaptor.plot_mesh_convergence_stats(mesh_seq,plot_len =6,subplot_ht=2)
 

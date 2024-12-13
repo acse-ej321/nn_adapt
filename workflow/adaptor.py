@@ -24,6 +24,7 @@ import firedrake.cython.dmcommon as dmcommon
 from workflow.features import extract_mesh_features, get_mesh_info, extract_array, get_hessians
 from workflow.features import extract_coarse_dwr_features
 from workflow.features import gnn_indicator_fit, gnn_noadj_indicator_fit, mlp_indicator_fit
+from workflow.timer import Timer
 
 
 from collections import defaultdict
@@ -403,6 +404,7 @@ class Adaptor_B(metaclass =abc.ABCMeta):
         
         return features
 
+    @Timer(logger = logging.info, text="adaptor - get all features, time taken: {:.6f}")
     def _get_all_features(self, mesh_seq):
         """
         get all features for export
@@ -428,7 +430,7 @@ class Adaptor_B(metaclass =abc.ABCMeta):
             output_file,'wb') as pickle_file:
                 pickle.dump(features, pickle_file)
 
-
+    @Timer(logger = logging.info, text="adaptor - get inital mesh stats, time taken: {:.6f}")
     def _get_initial_stats(self, mesh_seq):
         """
         append statistics to relavent lists
@@ -454,16 +456,14 @@ class Adaptor_B(metaclass =abc.ABCMeta):
     
 
     # adapt the mesh
+    @Timer(logger = logging.info, text="adaptor - mesh adapt time taken: {:.6f}")
     def _adapt_meshes(self, mesh_seq):
-
-        # timer start:
-        duration = -perf_counter()
 
         for i in range(len(mesh_seq)):
             # only run to min number of iterations
             # TODO: check where parsing miniter from now
             if mesh_seq.fp_iteration >= mesh_seq.params["miniter"]:
-                print(f'\n reached max uniform iterations at {mesh_seq.fp_iteration}\
+                print(f'\n reached max iterations at {mesh_seq.fp_iteration}\
                 base on min iter {mesh_seq.params["miniter"]}')
                 return False
         
@@ -473,12 +473,7 @@ class Adaptor_B(metaclass =abc.ABCMeta):
                 print(f'\t adaptor - new mesh name: mesh_{i}_{mesh_seq.fp_iteration +1}')
                 mh = fd.MeshHierarchy(mesh_seq.meshes[i],1)
                 mesh_seq.meshes[i] = mh[-1]
-                mesh_seq.meshes[i].name = f'mesh_{i}_{mesh_seq.fp_iteration +1}'
-
-        # timer end
-        duration += perf_counter()
-        logging.info(f'adaptor - uniform adaptor time taken: {duration:.6f}')
-                
+                mesh_seq.meshes[i].name = f'mesh_{i}_{mesh_seq.fp_iteration +1}'               
         
 
     # print info
@@ -494,7 +489,8 @@ class Adaptor_B(metaclass =abc.ABCMeta):
             gol_adj.pyrint(
                 f"subinterval: {i} vertices: {nvert:4d} elements: {nelem:4d}"
             )
-
+    
+    @Timer(logger = logging.info, text="adaptor - adaptor, time taken: {:.6f}")
     def adaptor(self, mesh_seq, solutions = None, indicators=None):
         self.adapt_iteration +=1
         features = self._get_all_features(mesh_seq)
@@ -567,6 +563,7 @@ class Adaptor_H(Adaptor_B):
             _met.rename(f'metric')
             file_out.write(*_met.subfunctions)
 
+    @Timer(logger = logging.info, text="adaptor - set ramp complexity, time taken: {:.6f}")
     def _set_ramp_complexity(self):
         """
         function to set the ramp complexity based on base and targets set 
@@ -592,7 +589,26 @@ class Adaptor_H(Adaptor_B):
         self.ramp_complexities.append(metric_params["dm_plex_metric_target_complexity"])
 
         return metric_params
+    
+    @Timer(logger = logging.info, text="adaptor - calculate hessian, time taken: {:.6f}")
+    def _recover_hessian(self, solution, metric_parameters, average=True, normalise = True):
+        hessians = [*get_hessians(solution, metric_parameters=metric_parameters)] # ej321
+        hessian = hessians[0] # ej321 - set the first hessian to the base
+        if average:
+            hessian.average(*hessians[1:]) # ej321 - all the other hessians
 
+        hessian.set_parameters(metric_parameters)
+        
+        # ej321 - steps not in Joe's workflow?
+        # for steady state - space normalisation
+        if normalise:
+            hessian.normalise()
+
+        return hessian
+    
+        
+
+    @Timer(logger = logging.info, text="adaptor - calculate metric, time taken: {:.6f}")
     def _calculate_metrics(self, mesh_seq):
 
         self.metrics = []
@@ -618,16 +634,7 @@ class Adaptor_H(Adaptor_B):
                 # print(f" - sol: {sol}")
             
                 # Recover the Hessian of the current solution
-                hessians = [*get_hessians(sol, metric_parameters=mp)] # ej321
-                hessian = hessians[0] # ej321 - set the first hessian to the base
-                
-                hessian.average(*hessians[1:]) # ej321 - all the other hessians
-            
-                hessian.set_parameters(mp)
-            
-                # ej321 - steps not in Joe's workflow?
-                # for steady state - space normalisation
-                hessian.normalise()
+                hessian = self._recover_hessian(sol, metric_parameters=mp) # ej321
                 
                 # _metric = hessian
 
@@ -663,15 +670,15 @@ class Adaptor_H(Adaptor_B):
         
         
             # metrics.append(metric)
-            self.metrics.append(metric)    
+            self.metrics.append(metric)
+                    
+  
 
     # adapt the mesh
+    @Timer(logger = logging.info, text="adaptor - adapt mesh, time taken: {:.6f}")
     def _adapt_meshes(self, mesh_seq):
 
         self.complexities = []
-
-        # timer start:
-        duration = -perf_counter()
 
         if not mesh_seq.steady:
             # Apply space time normalisation
@@ -690,11 +697,6 @@ class Adaptor_H(Adaptor_B):
                                                 metric, name=f'mesh_{i}_{mesh_seq.fp_iteration+1}')
                 # print(f'new mesh: {mesh_seq.meshes[i].name}')
 
-
-        # timer end
-        duration += perf_counter()
-        logging.info(f'adaptor - hessian adaptor time taken: {duration:.6f}')
-
     def _adaptor_info(self, mesh_seq):
         """
         Print progress of adaptation to screen
@@ -709,6 +711,7 @@ class Adaptor_H(Adaptor_B):
                 f"subinterval: {i} vertices: {nvert:4d} elements: {nelem:4d} complexity: {complexity:4.0f}"
             )
 
+    @Timer(logger = logging.info, text="adaptor - adaptor, time taken: {:.6f}")
     def adaptor(self, mesh_seq, solutions = None, indicators=None):
         self.adapt_iteration +=1
         features = self._get_all_features(mesh_seq)
@@ -778,6 +781,8 @@ class Adaptor_I(Adaptor_H):
         else:
             print(f'ML indicator method not selected')
 
+
+    @Timer(logger = logging.info, text="adaptor - calculate metric, time taken: {:.6f}")
     def _calculate_metrics(self, mesh_seq):
 
         self.metrics = []
@@ -842,6 +847,7 @@ class Adaptor_I(Adaptor_H):
             self.metrics.append(metric)
 
         # OUTPUT TO VTK - CALLBACK? or in adaptor?
+    @Timer(logger = logging.info, text="adaptor - adaptor, time taken: {:.6f}")
     def adaptor(self, mesh_seq, solutions = None, indicators=None):
         self.adapt_iteration +=1
         features = self._get_all_features(mesh_seq)
@@ -878,6 +884,7 @@ class Adaptor_A(Adaptor_I):
             "metric": self._output_metric
         }
 
+    @Timer(logger = logging.info, text="adaptor - calculate metric, time taken: {:.6f}")
     def _calculate_metrics(self, mesh_seq):
 
         self.metrics = []
@@ -900,15 +907,7 @@ class Adaptor_A(Adaptor_I):
                 indi = mesh_seq.indicators[self.field][i][j]
 
                 # Recover the Hessian of the current solution
-                duration = -perf_counter()
-                hessians = [*get_hessians(sol, metric_parameters=mp)] # ej321
-                hessian = hessians[0] # ej321 - set the first hessian to the base
-                
-                # timer end
-                duration += perf_counter()
-                logging.info(f' adapt - anisotropic hessian est time taken: {duration:.6f}')
-                
-                hessian.average(*hessians[1:]) # ej321 - all the other hessians
+                hessian = self._recover_hessian(sol, metric_parameters=mp, normalise=False) # ej321
                 
                 # append list for analysis
                 self.hessians.append(hessian)

@@ -112,9 +112,10 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
                 # adaptation kwargs
                 "indicator_method": "gnn", # added as flag for fp iteration, options "gnn"
                 "adaptor_method":"steady_anisotropic",
-                "fix_boundary": False,
-                "area_labels": [],
-                "fix_area": False,
+                "fix_boundary": True, # ej321 Dec24 try with true
+                "boundary_labels": [5,6],
+                "area_labels": [7,8],
+                "fix_area": True,
                 "indicator_method" : None,
 
                 #metric kwargs
@@ -140,6 +141,7 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
         W= kwargs.get('domain_width',500)
         dx_inner = kwargs.get('dx_inner',20)
         dx_outer = kwargs.get('dx_outer',20)
+        coordinates = kwargs.get("coordinates")
 
         # pc: 
         # local_path = 'home/phd01'
@@ -154,6 +156,7 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
         # create new mesh
         meshpath = TurbineMeshSeq.create_turbine_mesh(filepath,
                                                       L = L, W = W, 
+                                                      coordinates=coordinates,
                                                       dx_inner = dx_inner,
                                                       dx_outer = dx_outer)
 
@@ -232,7 +235,7 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
 
     @staticmethod
     def create_turbine_mesh(meshpath, filename="inital_turbine_mesh.msh", m=0, L=1200.,W=500.,
-                            D=18., z=0., 
+                            D=18., z=0., coordinates = None,
                             dx_inner=20.,dx_outer=20., n_min=1, n_max=8):
         
         print(f'IN CREATE MESH : L {L} W {W}')
@@ -245,10 +248,13 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
         x_max= L-100
         y_min=50
         y_max=W-100
+
+        
+
         #coordinates = rand_2d_coords(x_min,x_max,y_min,y_max,n_min=3,n_max=4)
         # TODO: allow non default parameters
-        params = TurbineMeshSeq.get_default_parameters()
-        coordinates = params["coordinates"]
+        # params = TurbineMeshSeq.get_default_parameters()
+
 
         #QC
         print(f'create turbine coordinates {coordinates}')
@@ -260,13 +266,20 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
 
         with pygmsh.geo.Geometry() as model:
             
-            # Get a list of the turbine mesh rectangle objects
-            rec_list=TurbineMeshSeq.add_turbine(model,coordinates,D, dx_inner)
+            if coordinates:
+                # Get a list of the turbine mesh rectangle objects
+                rec_list=TurbineMeshSeq.add_turbine(model,coordinates,D, dx_inner)
         
-            # Create outer mesh and add turbines in as 'holes'
-            rec_outer = model.add_rectangle(0, L, 0, W, z, 
-                                    mesh_size=dx_outer,
-                                holes=[rec.curve_loop for rec in rec_list], make_surface=True)
+                # Create outer mesh and add turbines in as 'holes'
+                rec_outer = model.add_rectangle(0, L, 0, W, z, 
+                                        mesh_size=dx_outer,
+                                    holes=[rec.curve_loop for rec in rec_list], make_surface=True)
+                
+            else: 
+                # Create outer mesh only
+                rec_outer = model.add_rectangle(0, L, 0, W, z, 
+                                        mesh_size=dx_outer,
+                                    holes=None, make_surface=True)
         
             # rec_surf=model.add_plane_surface(rec.curve_loop) # may not need
         
@@ -277,12 +290,16 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
             model.add_physical(rec_outer.lines[3], "Inflow")  #Left Boundary
             model.add_physical(rec_outer.lines[1], "Outflow")  #Right Boundary
             model.add_physical([rec_outer.lines[0], rec_outer.lines[2]], "Walls")  #Sides
+
             model.add_physical(rec_outer.surface, "Volume")  # Outside loop
-        
             # Add label for all turbines
-            [model.add_physical(rec.surface,f'Turbine_{i}') for i,rec in enumerate(rec_list)]
-
-
+            if coordinates:
+                for i,rec in enumerate(rec_list):
+                    # model.add_physical(rec.surface,f'Turbine_area_{i}')
+                    model.add_physical(rec.curve_loop.curves,f'Turbine_boundary_{i}')
+                for i,rec in enumerate(rec_list):
+                    model.add_physical(rec.surface,f'Turbine_area_{i}')
+                # model.add_physical(rec.curve_loop,f'Turbine_boundary_{i}')
             # Works
             # geometry.generate_mesh(dim=dim,algorithm=algorithm,verbose=True)
             model.generate_mesh(dim=dim,algorithm=algorithm,verbose=True)

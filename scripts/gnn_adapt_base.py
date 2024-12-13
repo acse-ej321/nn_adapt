@@ -9,7 +9,7 @@ input_params = {
     "coordinates": [(456, 232), (744,268)],
             }
 
-rootfolder = f"/data0/nn_adapt/output/Dec2024_gnn_test/"
+rootfolder = f"/data0/nn_adapt/output/Dec2024_gnn_test_fix_boundary/"
 
 ## UNIFORM --------------------------------------------------------------
 
@@ -22,8 +22,8 @@ rootfolder = f"/data0/nn_adapt/output/Dec2024_gnn_test/"
 # print(f'\n\nmethod: {sim_uniform.params["adaptor_method"] }, {sim_uniform.params["indicator_method"]} ')
 
 
-# sim_uniform.params['miniter'] = 5
-# sim_uniform.params['maxiter'] = 6
+# sim_uniform.params['miniter'] = 4
+# sim_uniform.params['maxiter'] = 5
 
 
 # logging.info(sim_uniform.params)
@@ -32,8 +32,9 @@ rootfolder = f"/data0/nn_adapt/output/Dec2024_gnn_test/"
 
 # --------------------------------------------------------------
 
+# run with 100 already
 num_refinements = 12 # targets up to 6400
-f= 1
+f= 0.5
 
 for i in range(num_refinements + 1):
 

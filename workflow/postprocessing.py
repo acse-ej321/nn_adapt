@@ -32,6 +32,9 @@ def export_plot_params_json(filepath, json_path):
     Example:
         export_plot_params_json('simulation_output.txt', '/path/to/output/')
     """
+    if not json_path:
+        json_path = os.getcwd()
+        print(f'Plot will be saved in: {json_path}')
 
     plot_params = {
         "qoi": [],
@@ -48,9 +51,12 @@ def export_plot_params_json(filepath, json_path):
     itime_list=[]
 
     # Initialize placeholders for extracted values
-    elev_dof = vel_dof = qoi = 0
-    stime = atime = ftime = 0
+    qoi = 0
     adapt_method = ""
+    atime = ftime = fiter = None
+    elev_dof = []
+    vel_dof = []
+    stime = []
 
     # process file
     skip_n_lines = 0
@@ -67,8 +73,10 @@ def export_plot_params_json(filepath, json_path):
             line = file.readline()
 
             if "Input parameters" in line:
-                tinfo = line[line.find("'adaptor_method'"):line.find("'fix_boundary'")].split(':')
-                adapt_method  = str(tinfo[1].strip().split('_')[-1].strip("',"))
+                ainfo = line[line.find("'adaptor_method'"):line.find("'fix_boundary'")].split(':')
+                adapt_method  = str(ainfo[1].strip().split('_')[-1].strip("',"))
+                iinfo = line[line.find("'indicator_method'"):line.find("'adaptor_method'")].split(':')
+                indicator_method  = str(iinfo[1].strip().split('_')[-1].strip("',"))
             elif "Number of 2D elevation DOFs:" in line:
                 elev_dof = int(line.split(":")[-1].strip())
             elif "Number of 2D velocity DOFs:" in line:
@@ -87,17 +95,22 @@ def export_plot_params_json(filepath, json_path):
             # Collect QoI and DoF once all relevant data is found
             if qoi and elev_dof and vel_dof:
                 qoi_list.append(qoi)
-                dof_list.append(elev_dof + vel_dof)
-                qoi = elev_dof = vel_dof = 0
+                # for anisotropic dwr - there are 2 solves, the second is the correct mesh
+                dof_list.append(elev_dof[-1] + vel_dof[-1])
+                elev_dof = []
+                vel_dof = []
+                qoi=None
 
             # Add times to the list
             if stime and atime:
-                itime_list.append(stime + atime)
-                stime = atime = 0
+                # for anisotropic dwr - there are 2 solves, the first is base solve
+                itime_list.append(stime[0] + atime)
+                stime = []
+                atime = 0
     
     # Update plot_params with extracted values
     plot_params.update({
-        "method": adapt_method,
+        "method": adapt_method if indicator_method == 'none' else indicator_method,
         "qoi": qoi_list,
         "dof": dof_list,
         "fiter": fiter,
@@ -192,6 +205,8 @@ def create_plot_dictionary(json_path):
         'hessian': {"color": "brown", "linestyle": ":"},
         'isotropic': {"color": "green", "linestyle": ":"},
         'anisotropic': {"color": "orange", "linestyle": "--"},
+        'mlp':{"color": "red", "linestyle": "-"},
+        'gnn':{"color": "pink", "linestyle": "-"},
     }
 
     # Populate the plot_dict from the plot_params
@@ -200,10 +215,6 @@ def create_plot_dictionary(json_path):
         
         if method == 'uniform':
             create_dict('uniform', {"color": "blue", "linestyle": "--"})
-            # Update parameters if they haven't been set yet
-            for key in ['qoi_name', 'qoi_unit', 'dof_name', 'dof_unit']:
-                if plot_dict[method][key] is None:
-                    plot_dict[method][key] = params[key]
             
             # Append the values to the lists
             plot_dict[method]['qoi_list'] += params['qoi'][1:]
@@ -215,16 +226,16 @@ def create_plot_dictionary(json_path):
             if method not in plot_dict:
                 create_dict(method, method_colors.get(method, {"color": "gray", "linestyle": "-"}))
             
-            # Update parameters if they haven't been set yet
-            for key in ['qoi_name', 'qoi_unit', 'dof_name', 'dof_unit']:
-                if plot_dict[method][key] is None:
-                    plot_dict[method][key] = params[key]
-            
             # Append the latest values for each key
             plot_dict[method]['qoi_list'].append(params['qoi'][-1])
             plot_dict[method]['dof_list'].append(params['dof'][-1])
             plot_dict[method]['ftime_list'].append(params['ftime'])
             plot_dict[method]['fiter_list'].append(params['fiter'])
+
+        # Update parameters if they haven't been set yet
+        for key in ['qoi_name', 'qoi_unit', 'dof_name', 'dof_unit']:
+            if plot_dict[method][key] is None:
+                plot_dict[method][key] = params[key]
 
     return plot_dict
 
@@ -264,10 +275,6 @@ def plot_qoi_vs_dof(plot_dict, show=True, json_path=None):
     qoi_unit = first_method['qoi_unit']
     dof_name = first_method['dof_name']
     dof_unit = first_method['dof_unit']
-    
-    # Initialize variables for plot limits
-    dof_min, dof_max = float('inf'), float('-inf')
-    qoi_min, qoi_max = float('inf'), float('-inf')
 
     # Initialize variables for plot limits
     dof_min, dof_max = _set_min_max()
@@ -365,7 +372,7 @@ def plot_cpu_vs_dof(plot_dict, show=True, json_path=None):
 
     # Set labels and grid
     axes.set_xlabel(f"{dof_name} ($\mathrm{{{dof_unit}}}$)")
-    axes.set_ylabel(r"CPU time ($\mathrm{s}$)")
+    axes.set_ylabel(f"CPU time ($\mathrm{{s}}$)")
     axes.grid(True, which="both")
 
     # Adjust layout, add legend, and save the figure
@@ -377,7 +384,7 @@ def plot_cpu_vs_dof(plot_dict, show=True, json_path=None):
     if show:
         plt.show
 
-def plot_eqoi_vs_dof(plot_dict, show=True, json_path = None):
+def plot_eqoi_vs_dof(plot_dict, show=True, json_path = None, benchmark='uniform'):
 
     if not json_path:
         json_path = os.getcwd()
@@ -388,7 +395,7 @@ def plot_eqoi_vs_dof(plot_dict, show=True, json_path = None):
     fig, axes = plt.subplots()
 
     #get best uniform qoi value as benchmark
-    qoi_benchmark = plot_dict['anisotropic']['qoi_list'][-1]
+    qoi_benchmark = plot_dict[benchmark]['qoi_list'][-1]
 
     # Extract metadata from the first item in plot_dict (assuming all methods have consistent metadata)
     first_method = next(iter(plot_dict.values()))
@@ -429,7 +436,7 @@ def plot_eqoi_vs_dof(plot_dict, show=True, json_path = None):
     
     # Set labels and grid
     axes.set_xlabel("DoF count")
-    axes.set_ylabel(r"QoI error ($\%$)")
+    axes.set_ylabel(f"QoI error ($\%$)")
     axes.grid(True)
 
     # Adjust layout, add legend, and save the figure
@@ -441,7 +448,7 @@ def plot_eqoi_vs_dof(plot_dict, show=True, json_path = None):
     if show:
         plt.show()
 
-def plot_eqoi_vs_cpu(plot_dict, show=True, json_path = None):
+def plot_eqoi_vs_cpu(plot_dict, show=True, json_path = None, benchmark='uniform'):
 
     if not json_path:
         json_path = os.getcwd()
@@ -452,7 +459,7 @@ def plot_eqoi_vs_cpu(plot_dict, show=True, json_path = None):
     fig, axes = plt.subplots()
 
     #get best uniform qoi value as benchmark
-    qoi_benchmark = plot_dict['anisotropic']['qoi_list'][-1]
+    qoi_benchmark = plot_dict[benchmark]['qoi_list'][-1]
 
     # Extract metadata from the first item in plot_dict (assuming all methods have consistent metadata)
     first_method = next(iter(plot_dict.values()))
@@ -476,17 +483,15 @@ def plot_eqoi_vs_cpu(plot_dict, show=True, json_path = None):
         print(key,y,x)
     
         
-        axes.scatter(x, y, color = value['color'])
-        if len(x)>2:
+        axes.scatter(x, y, color = value['color'], label=key)
+        if key == 'uniform':
             a,b = np.polyfit(np.log(x[:1]), np.log(y[:1]),1)
             axes.loglog(x,x**a*np.exp(b), '.', label=key, 
                 color=value['color'], linestyle=value['linestyle'])
-            
-    
     
     # Set labels and grid
-    axes.set_xlabel(r"CPU time ($\mathrm{s}$)")
-    axes.set_ylabel(r"QoI error ($\%$)")
+    axes.set_xlabel(f"CPU time ($\mathrm{{s}}$)")
+    axes.set_ylabel(f"QoI error ($\%$)")
     # axes.set_ylabel(f"{qoi_name} ($\mathrm{{{qoi_unit}}}$)")
     # axes.set_xlabel(r"CPU time ($\mathrm{s}$)")
     axes.grid(True)

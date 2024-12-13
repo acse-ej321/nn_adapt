@@ -125,6 +125,10 @@ class Adaptor_B(metaclass =abc.ABCMeta):
         self.field = kwargs.get("field")
         self.local_filepath = kwargs.get("local_filepath")
         self.adaptor_method = kwargs.get("adaptor_method")
+        self.fix_boundary = kwargs.get("fix_boundary")
+        self.boundary_labels = kwargs.get("boundary_labels")
+        self.fix_area = kwargs.get("fix_area")
+        self.area_labels = kwargs.get("area_labels")
         self.adapt_iteration = 0
         self.qois = []
         self.mesh_stats = []
@@ -454,6 +458,143 @@ class Adaptor_B(metaclass =abc.ABCMeta):
     def _calculate_metrics(self, mesh_seq):
         pass
     
+    def _fix_mesh(self, mesh_seq):
+        """
+        fix the mesh
+        """
+        if self.fix_boundary:
+            self.boundary_labels_dict={}
+            self.set_fixed_boundary(mesh_seq[0])
+        if self.fix_area:
+            self.area_labels_dict={}
+            self.set_fixed_area(mesh_seq[0])
+
+    def _unfix_mesh(self, mesh_seq):
+        """
+        unfix the mesh
+        """
+        if self.fix_boundary:
+            assert(len(self.boundary_labels_dict.keys())>0, KeyError("boundary labels not correctly set"))
+
+            self.unset_fixed_boundary(mesh_seq[0])
+        if self.fix_area:
+            assert(len(self.area_labels_dict.keys())>0, KeyError("area labels not correctly set"))
+            self.unset_fixed_area(mesh_seq[0])
+
+
+    def set_fixed_area(self, mesh):
+        """
+        Fix an area of the mesh at a cell level from adapting
+        """
+
+        _index = np.max(mesh.topology_dm.getLabelIdIS(dmcommon.CELL_SETS_LABEL).indices)+10
+        # print(f"for boundary fix label id start at {_index}")
+
+        for label_id in self.area_labels:
+            # initialize list to store new boundary segment ids
+            self.area_labels_dict[label_id] = []
+            # get the edge id's associated witht he boundary
+            group_orig=mesh.topology_dm.getStratumIS(
+                dmcommon.CELL_SETS_LABEL,label_id).indices
+            
+            # check that something to reassign
+            if group_orig.size > 0:
+                # # user specified starting index for where to start relabeling
+                # _index = self.params["boundary_start_i"]
+                # loop and add markers for each cell individually in the mesh
+                for el in group_orig:
+                    mesh.topology_dm.clearLabelValue(dmcommon.CELL_SETS_LABEL, el, label_id) # is this needed? YES!!
+                    mesh.topology_dm.setLabelValue(dmcommon.CELL_SETS_LABEL, el, _index)
+                    # print(f"set {el} el to {_index} id")
+                    # save new label association with original
+                    self.area_labels_dict[label_id].append(_index)
+                    _index+=1
+
+            # QC:
+            # print(f"face labels after fix : {mesh.topology_dm.getLabelIdIS(dmcommon.CELL_SETS_LABEL).indices}")
+            # print(f"face labels after fix : {mesh.topology_dm.getStratumIS(dmcommon.CELL_SETS_LABEL,label_id).indices}")
+
+
+    def unset_fixed_area(self, mesh):
+        """
+        Unfix an area of the mesh at a cell level from adapting
+        """
+        # get the list of all boundary ids currently in the mesh
+        new_labels = list(mesh.topology_dm.getLabelIdIS(dmcommon.CELL_SETS_LABEL).indices)
+        dropped = []
+        for label_id in self.area_labels:
+
+            for new_id_ in self.area_labels_dict[label_id]:  
+                
+                if new_id_ in new_labels:
+                    group_new = mesh.topology_dm.getStratumIS(dmcommon.CELL_SETS_LABEL,new_id_).indices
+                    for el_ in group_new:
+                        mesh.topology_dm.clearLabelValue(dmcommon.CELL_SETS_LABEL,el_, new_id_) # is this needed? YES!!
+                        mesh.topology_dm.setLabelValue(dmcommon.CELL_SETS_LABEL, el_, label_id)
+                else:
+                    dropped.append(new_id_)
+        
+        # QC:
+        # print(f"{dropped} dropped by MMG")
+
+
+    def set_fixed_boundary(self, mesh):
+        """
+        Fix an area of the mesh at a boundary from adapting
+        """
+        #TODO: get rid of hardcoded index advancement
+        _index = np.max(mesh.topology_dm.getLabelIdIS(dmcommon.FACE_SETS_LABEL).indices)+10
+
+        print(f'in set fixed boundary: {self.boundary_labels}, {mesh.topology_dm.getLabelIdIS(dmcommon.FACE_SETS_LABEL).indices}')
+
+        for label_id in self.boundary_labels:
+            print(label_id)
+            # initialize list to store new boundary segment ids
+            self.boundary_labels_dict[label_id] = []
+            print(self.boundary_labels_dict)
+            # get the edge id's associated witht he boundary
+            group_orig=mesh.topology_dm.getStratumIS(
+                dmcommon.FACE_SETS_LABEL,label_id).indices
+            print(group_orig)
+            # check that something to reassign
+            if group_orig.size > 0:
+                # # user specified starting index for where to start relabeling
+                # _index = self.params["boundary_start_i"]
+                # loop and add markers for each cell individually in the mesh
+                for el in group_orig:
+                    mesh.topology_dm.clearLabelValue(dmcommon.FACE_SETS_LABEL,el, label_id) # is this needed? YES!!
+                    mesh.topology_dm.setLabelValue(dmcommon.FACE_SETS_LABEL, el, _index)
+                    # print(f"set {el} el to {_index} id")
+                    # save new label association with original
+                    self.boundary_labels_dict[label_id].append(_index)
+                    _index+=1
+            print(self.boundary_labels_dict)
+            # QC:
+            print(f"face labels after fix : {mesh.topology_dm.getLabelIdIS(dmcommon.FACE_SETS_LABEL).indices}")
+            print(f"face labels after fix : {mesh.topology_dm.getStratumIS(dmcommon.FACE_SETS_LABEL,label_id).indices}")
+        
+
+    def unset_fixed_boundary(self, mesh):
+        """
+        Unfix an area of the mesh at a boundary from adapting
+        """
+
+        # get the list of all boundary ids currently in the mesh
+        new_labels = list(mesh.topology_dm.getLabelIdIS(dmcommon.FACE_SETS_LABEL).indices)
+        dropped = []
+        for label_id in self.boundary_labels:
+
+            for new_id_ in self.boundary_labels_dict[label_id]:  
+                
+                if new_id_ in new_labels:
+                    group_new = mesh.topology_dm.getStratumIS(dmcommon.FACE_SETS_LABEL,new_id_).indices
+                    for el_ in group_new:
+                        mesh.topology_dm.clearLabelValue(dmcommon.FACE_SETS_LABEL,el_, new_id_) # is this needed? YES!!
+                        mesh.topology_dm.setLabelValue(dmcommon.FACE_SETS_LABEL, el_, label_id)
+                else:
+                    dropped.append(new_id_)
+        # QC:
+        print(f"{dropped} dropped by MMG")
 
     # adapt the mesh
     @Timer(logger = logging.info, text="adaptor - mesh adapt time taken: {:.6f}")
@@ -497,8 +638,8 @@ class Adaptor_B(metaclass =abc.ABCMeta):
         self._export_features(mesh_seq, features)
         # TODO: output checkpoint file
         self._get_initial_stats(mesh_seq)
-        self._output_selection(mesh_seq = mesh_seq, format="vtk")
         self._calculate_metrics(mesh_seq)
+        self._output_selection(mesh_seq = mesh_seq, format="vtk")
         self._adapt_meshes(mesh_seq)
         self._adaptor_info(mesh_seq)
         return True
@@ -717,9 +858,11 @@ class Adaptor_H(Adaptor_B):
         features = self._get_all_features(mesh_seq)
         self._export_features(mesh_seq, features)
         self._get_initial_stats(mesh_seq)
+        self._fix_mesh(mesh_seq)
         self._calculate_metrics(mesh_seq)
         self._output_selection(mesh_seq = mesh_seq, format="vtk")
         self._adapt_meshes(mesh_seq)
+        self._unfix_mesh(mesh_seq)
         self._adaptor_info(mesh_seq)
 
         # check if the target complexity has been (approximately) reached on each subinterval
@@ -854,9 +997,11 @@ class Adaptor_I(Adaptor_H):
         self._export_features(mesh_seq, features)
         self._get_indicator(mesh_seq, features)
         self._get_initial_stats(mesh_seq)
+        self._fix_mesh(mesh_seq)
         self._calculate_metrics(mesh_seq)
         self._output_selection(mesh_seq = mesh_seq, format="vtk")
         self._adapt_meshes(mesh_seq)
+        self._unfix_mesh(mesh_seq)
         self._adaptor_info(mesh_seq)
 
         # check if the target complexity has been (approximately) reached on each subinterval

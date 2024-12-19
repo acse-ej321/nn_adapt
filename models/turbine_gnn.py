@@ -5,29 +5,52 @@ import numpy as np
 import goalie_adjoint as gol_adj # new sept23
 # from workflow.utility import *
 from workflow.features import * # ej321 - for feature extraction
+from workflow.timer import Timer
+from models.bathymetry import BathymetrySelection
 
 import thetis as thetis
 import pygmsh
 import gmsh
 
-from collections import OrderedDict
-from time import perf_counter
 import logging
+import json
 
 from firedrake.__future__ import interpolate # ej321 - temp for firedrake update
 
 import os
 
+
+def get_parameters_from_json(filepath):
+    """
+    load parameter file from json file - this in not ideal
+    but a work around to pass parameters not allowed through the
+    Goalie API currently.
+    """
+    if os.path.exists(filepath):
+        with open(filepath, 'r') as fp:
+            params = json.load(fp)
+        print(f"load parameters from file: {filepath}")
+    else: 
+        params = TurbineMeshSeq.get_default_parameters()
+        print(f"load parameters from defaults: {filepath}")
+    return params
+
+
 class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
     
     def __init__(self, *args, **kwargs):
         self.thetis_manager={}
+        self.filepath = kwargs.get("local_filepath",
+                                 os.getcwd())
         # TODO: check if this still utilized
         self.model_features={} # add for feature extraction ala E2N - model specific
         super().__init__(*args, **kwargs)
+        # self.params =kwargs.get('parameters',
+        #                          self.get_default_parameters())
         self.params =kwargs.get('parameters',
-                                 self.get_default_parameters())
-
+                                 get_parameters_from_json(
+                                     f"{self.filepath}/input_parameters.json"
+                                     ))
     @staticmethod
     def get_default_parameters():
         return {
@@ -39,11 +62,22 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
                 "field":"solution_2d",
                 "fields":["solution_2d"],
                 "num_meshes":1,
+
                 # qoi kwargs
                 "qoi_name":"power output",
                 "qoi_unit":"MW",
+                
+
+                # mesh kwargs
+                "initial_mesh_path":None,
+                "domain_length": 1200,
+                "domain_width": 500,
+                "dx_inner": 20,
+                "dx_outer":20,
+
                 # simulation kwargs
                 "output_directory":'outputs_nn_adapt', # for thetis
+                "bathymetry_model":"constant",
                 "viscosity_coefficient":0.5,
                 "depth": 40.0,
                 "drag_coefficient":0.0025,
@@ -83,8 +117,9 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
                 # adaptation kwargs
                 "indicator_method": "gnn", # added as flag for fp iteration, options "gnn"
                 "adaptor_method":"steady_anisotropic",
-                "fix_boundary": False,
-                "area_labels": [],
+                "fix_boundary": False, # ej321 Dec24 try with true
+                "boundary_labels": [5,6],
+                "area_labels": [7,8],
                 "fix_area": False,
                 "indicator_method" : None,
 
@@ -103,8 +138,27 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
    
         # Get local path if mesh exists
         # linux:
-        local_path= 'data0'
-        local_folder = 'nn_adapt/models/inputs'
+
+        local_mesh = kwargs.get('initial_mesh_path')
+
+        if local_mesh is not None:
+            meshpath = local_mesh
+
+        else:        
+            L = kwargs.get('domain_length',1200)
+            W= kwargs.get('domain_width',500)
+            dx_inner = kwargs.get('dx_inner',20)
+            dx_outer = kwargs.get('dx_outer',20)
+            coordinates = kwargs.get("coordinates")
+
+            meshpath = TurbineMeshSeq.create_turbine_mesh(filepath,
+                                                L = L, W = W, 
+                                                coordinates=coordinates,
+                                                dx_inner = dx_inner,
+                                                dx_outer = dx_outer)
+
+        num_meshes = kwargs.get('num_meshes',1)
+
 
         # pc: 
         # local_path = 'home/phd01'
@@ -117,7 +171,7 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
         # mesh = TurbineMeshSeq.create_turbine_mesh()
 
         # create new mesh
-        meshpath = TurbineMeshSeq.create_turbine_mesh(filepath)
+
 
 
         def create_default_meshes(num_meshes,**kwargs):
@@ -193,9 +247,12 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
         return rec_list
 
     @staticmethod
-    def create_turbine_mesh(meshpath, filename="inital_turbine_mesh.msh", m=0, L=1200.,W=500.,D=18., z=0., 
+    def create_turbine_mesh(meshpath, filename="inital_turbine_mesh.msh", m=0, L=1200.,W=500.,
+                            D=18., z=0., coordinates = None,
                             dx_inner=20.,dx_outer=20., n_min=1, n_max=8):
         
+        print(f'IN CREATE MESH : L {L} W {W}')
+
         dim=2 #2D
         algorithm=8 #same as Joes E2N paper
         
@@ -204,10 +261,13 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
         x_max= L-100
         y_min=50
         y_max=W-100
+
+        
+
         #coordinates = rand_2d_coords(x_min,x_max,y_min,y_max,n_min=3,n_max=4)
         # TODO: allow non default parameters
-        params = TurbineMeshSeq.get_default_parameters()
-        coordinates = params["coordinates"]
+        # params = TurbineMeshSeq.get_default_parameters()
+
 
         #QC
         print(f'create turbine coordinates {coordinates}')
@@ -219,13 +279,20 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
 
         with pygmsh.geo.Geometry() as model:
             
-            # Get a list of the turbine mesh rectangle objects
-            rec_list=TurbineMeshSeq.add_turbine(model,coordinates,D, dx_inner)
+            if coordinates:
+                # Get a list of the turbine mesh rectangle objects
+                rec_list=TurbineMeshSeq.add_turbine(model,coordinates,D, dx_inner)
         
-            # Create outer mesh and add turbines in as 'holes'
-            rec_outer = model.add_rectangle(0, L, 0, W, z, 
-                                    mesh_size=dx_outer,
-                                holes=[rec.curve_loop for rec in rec_list], make_surface=True)
+                # Create outer mesh and add turbines in as 'holes'
+                rec_outer = model.add_rectangle(0, L, 0, W, z, 
+                                        mesh_size=dx_outer,
+                                    holes=[rec.curve_loop for rec in rec_list], make_surface=True)
+                
+            else: 
+                # Create outer mesh only
+                rec_outer = model.add_rectangle(0, L, 0, W, z, 
+                                        mesh_size=dx_outer,
+                                    holes=None, make_surface=True)
         
             # rec_surf=model.add_plane_surface(rec.curve_loop) # may not need
         
@@ -236,12 +303,16 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
             model.add_physical(rec_outer.lines[3], "Inflow")  #Left Boundary
             model.add_physical(rec_outer.lines[1], "Outflow")  #Right Boundary
             model.add_physical([rec_outer.lines[0], rec_outer.lines[2]], "Walls")  #Sides
+
             model.add_physical(rec_outer.surface, "Volume")  # Outside loop
-        
             # Add label for all turbines
-            [model.add_physical(rec.surface,f'Turbine_{i}') for i,rec in enumerate(rec_list)]
-
-
+            if coordinates:
+                for i,rec in enumerate(rec_list):
+                    # model.add_physical(rec.surface,f'Turbine_area_{i}')
+                    model.add_physical(rec.curve_loop.curves,f'Turbine_boundary_{i}')
+                for i,rec in enumerate(rec_list):
+                    model.add_physical(rec.surface,f'Turbine_area_{i}')
+                # model.add_physical(rec.curve_loop,f'Turbine_boundary_{i}')
             # Works
             # geometry.generate_mesh(dim=dim,algorithm=algorithm,verbose=True)
             model.generate_mesh(dim=dim,algorithm=algorithm,verbose=True)
@@ -463,10 +534,12 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
         """
         Compute the bathymetry field on the current `mesh`.
         """
+
+        return BathymetrySelection(self.params['bathymetry_model'], mesh, **self.params)
         # NOTE: We assume a constant bathymetry field
-        depth =self.params['depth']
-        P0_2d = thetis.get_functionspace(mesh, "DG", 0)
-        return fd.Function(P0_2d).assign(depth)
+        # depth =self.params['depth']
+        # P0_2d = thetis.get_functionspace(mesh, "DG", 0)
+        # return fd.Function(P0_2d).assign(depth)
 
     # def u_inflow(self, mesh):
     def u_inflow(self, mesh):
@@ -705,58 +778,50 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
 
     #     return bcs
 
-
     def get_solver(self):
 
         # def solver(index, ic):
+        
         def solver(index):
             # print(f'\n\nEJ CHECK solver called')
 
-            # timer start:
-            duration = -perf_counter() # ej321 - TIMING
+            with Timer(logger = logging.info, text="solve - forward solve, time taken: {:.6f}"):
 
-            field=self.params["field"]
+
+                field=self.params["field"]
             # thetis_obj=self.get_flowsolver2d(self[index], ic[field])
 
-            thetis_obj=self.manage_thetis_object(self[index])
-            thetis_obj.simulation_time=0.
+                thetis_obj=self.manage_thetis_object(self[index])
+                thetis_obj.simulation_time=0.
 
-            # Assign initial condition
-            # _sol, _sol_old = self.fields[field] # current, last/ic
-            _sol = self.fields[field] # current, last/ic
-            # c.assign(c_)
-            # thetis_obj.fields.solution_2d.assign(ic[field])
-            # thetis_obj.fields.solution_2d.assign(_sol_old)
+                # Assign initial condition
+                # _sol, _sol_old = self.fields[field] # current, last/ic
+                _sol = self.fields[field] # current, last/ic
+                # c.assign(c_)
+                # thetis_obj.fields.solution_2d.assign(ic[field])
+                # thetis_obj.fields.solution_2d.assign(_sol_old)
 
-            # Communicate variational form to mesh_seq
-            self.read_forms({field:thetis_obj.timestepper.F})
-            
+                # Communicate variational form to mesh_seq
+                self.read_forms({field:thetis_obj.timestepper.F})
+                
 
-            thetis_obj.fields.solution_2d.assign(_sol)
-            
+                thetis_obj.fields.solution_2d.assign(_sol)
+                
 
-            print(f"\n BEFORE ITERATE {thetis_obj.callbacks['export']['turbine'].integrated_power[0]}\n\n")
-            
-
-
-            iterate = thetis_obj.get_iterate()
-            # thetis_obj.iterate_ej321()
-
-            iterate()
-
-            _sol.assign(thetis_obj.fields.solution_2d)
-            
-            print(thetis_obj.callbacks['export']['turbine'].integrated_power[0])
-            solution = thetis_obj.fields.solution_2d
-            # ic[field]=solution
+                print(f"\n BEFORE ITERATE {thetis_obj.callbacks['export']['turbine'].integrated_power[0]}\n\n")
+                
 
 
+                iterate = thetis_obj.get_iterate()
+                # thetis_obj.iterate_ej321()
 
-            # timer end
-            duration += perf_counter() # ej321 - TIMING
-            # log time:
-            logging.info(f'TIMING, forward_solve, {duration:.6f}')  # ej321 - TIMING
-            print(f'forward_solve time taken: {duration:.6f} seconds')  # ej321 - TIMING
+                iterate()
+
+                _sol.assign(thetis_obj.fields.solution_2d)
+                
+                print(thetis_obj.callbacks['export']['turbine'].integrated_power[0])
+                solution = thetis_obj.fields.solution_2d
+                # ic[field]=solution
             
             # get model specific features
             self.get_model_features(self[index])
@@ -845,14 +910,15 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
 
         def qoi():
             thetis_obj=self.manage_thetis_object(self[i])          
-        
+            rho = fd.Constant(self.params["density"])
             return sum([
-            farm.turbine.power(thetis_obj.callbacks['export']['turbine'].uv,
-                                thetis_obj.callbacks['export']['turbine'].depth)
+            farm.turbine.power(thetis_obj.callbacks['export']['turbine'].uv, 
+                               thetis_obj.callbacks['export']['turbine'].depth)
              * farm.turbine_density
-             *fd.Constant(0.001)
-             * farm.dx
-            for farm in thetis_obj.callbacks['export']['turbine'].farms])
+            #  *fd.Constant(0.001) # convert to MW
+            * rho # consistency with Joe's code
+             * fd.dx
+            for farm in thetis_obj.callbacks['export']['turbine'].farms]) 
 
         return qoi
 

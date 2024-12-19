@@ -533,7 +533,8 @@ def joint_sort_lists(list_of_lists, index_sortlist=0):
 
 if __name__ == "__main__":
     # test script
-    json_path = r"/data0/nn_adapt/output/Dec2024_gnn_test/target_4000/offset/base/"
+    json_path = r"/data0/nn_adapt/output/Dec2024_gnn_test_fix_boundary/target_4000/offset/base/"
+    
     files = create_logfile_list(json_path, "timesout.txt")
     for file in files:
         export_plot_params_json(file, json_path)

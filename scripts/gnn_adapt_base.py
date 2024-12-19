@@ -9,7 +9,7 @@ input_params = {
     "coordinates": [(456, 232), (744,268)],
             }
 
-rootfolder = f"/data0/nn_adapt/output/Dec2024_gnn_test_fix_boundary/"
+rootfolder = f"/data0/nn_adapt/output/Dec2024_gnn_finesample/"
 
 ## UNIFORM --------------------------------------------------------------
 
@@ -33,8 +33,8 @@ rootfolder = f"/data0/nn_adapt/output/Dec2024_gnn_test_fix_boundary/"
 # --------------------------------------------------------------
 
 # run with 100 already
-num_refinements = 12 # targets up to 6400
-f= 0.5
+num_refinements = 40 # targets up to 6400
+f= 0.25
 
 for i in range(num_refinements + 1):
 

@@ -48,7 +48,9 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
         # self.params =kwargs.get('parameters',
         #                          self.get_default_parameters())
         self.params =kwargs.get('parameters',
-                                 get_parameters_from_json(f"{self.filepath}/input_parameters.json"))
+                                 get_parameters_from_json(
+                                     f"{self.filepath}/input_parameters.json"
+                                     ))
     @staticmethod
     def get_default_parameters():
         return {
@@ -60,11 +62,14 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
                 "field":"solution_2d",
                 "fields":["solution_2d"],
                 "num_meshes":1,
+
                 # qoi kwargs
                 "qoi_name":"power output",
                 "qoi_unit":"MW",
+                
 
                 # mesh kwargs
+                "initial_mesh_path":None,
                 "domain_length": 1200,
                 "domain_width": 500,
                 "dx_inner": 20,
@@ -112,10 +117,10 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
                 # adaptation kwargs
                 "indicator_method": "gnn", # added as flag for fp iteration, options "gnn"
                 "adaptor_method":"steady_anisotropic",
-                "fix_boundary": True, # ej321 Dec24 try with true
+                "fix_boundary": False, # ej321 Dec24 try with true
                 "boundary_labels": [5,6],
                 "area_labels": [7,8],
-                "fix_area": True,
+                "fix_area": False,
                 "indicator_method" : None,
 
                 #metric kwargs
@@ -133,15 +138,27 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
    
         # Get local path if mesh exists
         # linux:
-        local_path= 'data0'
-        local_folder = 'nn_adapt/models/inputs'
+
+        local_mesh = kwargs.get('initial_mesh_path')
+
+        if local_mesh is not None:
+            meshpath = local_mesh
+
+        else:        
+            L = kwargs.get('domain_length',1200)
+            W= kwargs.get('domain_width',500)
+            dx_inner = kwargs.get('dx_inner',20)
+            dx_outer = kwargs.get('dx_outer',20)
+            coordinates = kwargs.get("coordinates")
+
+            meshpath = TurbineMeshSeq.create_turbine_mesh(filepath,
+                                                L = L, W = W, 
+                                                coordinates=coordinates,
+                                                dx_inner = dx_inner,
+                                                dx_outer = dx_outer)
 
         num_meshes = kwargs.get('num_meshes',1)
-        L = kwargs.get('domain_length',1200)
-        W= kwargs.get('domain_width',500)
-        dx_inner = kwargs.get('dx_inner',20)
-        dx_outer = kwargs.get('dx_outer',20)
-        coordinates = kwargs.get("coordinates")
+
 
         # pc: 
         # local_path = 'home/phd01'
@@ -154,11 +171,7 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
         # mesh = TurbineMeshSeq.create_turbine_mesh()
 
         # create new mesh
-        meshpath = TurbineMeshSeq.create_turbine_mesh(filepath,
-                                                      L = L, W = W, 
-                                                      coordinates=coordinates,
-                                                      dx_inner = dx_inner,
-                                                      dx_outer = dx_outer)
+
 
 
         def create_default_meshes(num_meshes,**kwargs):
@@ -524,9 +537,9 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
 
         return BathymetrySelection(self.params['bathymetry_model'], mesh, **self.params)
         # NOTE: We assume a constant bathymetry field
-        depth =self.params['depth']
-        P0_2d = thetis.get_functionspace(mesh, "DG", 0)
-        return fd.Function(P0_2d).assign(depth)
+        # depth =self.params['depth']
+        # P0_2d = thetis.get_functionspace(mesh, "DG", 0)
+        # return fd.Function(P0_2d).assign(depth)
 
     # def u_inflow(self, mesh):
     def u_inflow(self, mesh):

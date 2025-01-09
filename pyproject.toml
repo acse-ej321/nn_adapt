@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools"]
+
+[project]
+name = "nn_adapt"
+version = "0.1"
+authors = [
+  {name = "Joseph G. Wallwork", email = "joe.wallwork@outlook.com"},
+  {name = "Eleda Johnson", email = "eleda.johnson21@imperial.ac.uk"},
+  {name = "Stephan C. Kramer"},
+]
+maintainers = [
+  {name = "Eleda Johnson", email = "eleda.johnson21@imperial.ac.uk"},
+]
+description = "data-driven mesh adaption"
+readme = "README.md"
+license = {file = "LICENSE"}
+classifiers = [
+  "Programming Language :: Python",
+]
+dependencies = [
+  "netCDF4",
+  "pyproj",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pre-commit",
+  "pytest",
+  "ruff",
+]
+
+[tool.setuptools]
+packages = ["nn_adapt"]
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+select = [
+  "B",  # flake8-bugbear
+  "C",  # mccabe complexity
+  "E", "W",  # Pycodestyle
+  "F",  # Pyflakes
+  "I",  # isort
+]
+ignore = [
+  "C901",  # too complex
+  "E226",  # missing whitespace around arithmetic operator
+  "E402",  # module level import not at top of file
+  "E501",  # line too long
+  "E741",  # ambiguous variable name
+  "F403",  # unable to detect undefined names
+  "F405",  # name may be undefined, or defined from star imports
+]
+
+[tool.pytest.ini_options]
+filterwarnings = [
+	"ignore:`np.bool8` is a deprecated alias for `np.bool_`*:DeprecationWarning",
+	"ignore:unable to find git revision*:UserWarning",
+]

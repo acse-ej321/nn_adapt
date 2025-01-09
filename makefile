@@ -1,14 +1,36 @@
 all: install
 
+.PHONY: install test
+
 install:
-	if [ -e ${VIRTUAL_ENV}/src/firedrake ]; then \
-		python3 -m pip install -r requirements.txt; \
-		python3 -m pip install -e .; \
-    else \
-		echo "You need to install Firedrake"; \
-	fi
+	@echo "Installing nn_adapt..."
+	@python3 -m pip install -e .
+	@echo "Done."
+
+install_dev:
+	@echo "Installing nn_adapt for development..."
+	@python3 -m pip install -e .[dev]
+	@echo "Done."
+	@echo "Setting up pre-commit..."
+	@pre-commit install
+	@echo "Done."
 
 lint:
 	@echo "Checking lint..."
-	@flake8 --ignore=E501,E226,E402,E731,E741,F403,F405,F999,N803,N806,W503
+	@ruff check
 	@echo "PASS"
+
+test: lint
+	@echo "Running all tests..."
+	@python3 -m pytest -v --durations=20 test
+	@echo "Done."
+
+coverage:
+	@echo "Generating coverage report..."
+	@python3 -m coverage erase
+	@python3 -m coverage run --source=nn_adapt -m pytest -v test
+	@python3 -m coverage html
+	@echo "Done."
+
+tree:
+	@tree -d .

@@ -19,6 +19,7 @@ from workflow.timer import Timer
 import json
 
 import shutil
+import argparse
 
 class AttrDict(dict):
     """
@@ -58,34 +59,103 @@ def create_folder(rootfolder, folderkey, filepath):
     if os.path.isdir(filepath):
         print(f'simulation using folder: {filepath}')
         return filepath
-    
-def create_params(Model, parameters):
-    """
-    combine all parameters into one dictionary and export to json
-    note: done to pass all parameters to Model in blind init given setup of Goalie
-    
-    adding feature from Joe's code parameter class to pass keys as methods
-    TODO: figure out a better place for this
-    """
-    params=AttrDict() # TODO: set some defaults for all parameters passed      
-    params.update(Model.get_default_parameters())
-    params.update(parameters)
 
-    return params
+     
+
+
+
 class Simulation():
     
     def __init__(self, Model, rootfolder=None, filepath=None, parameters={}):
         self.rootfolder = rootfolder if rootfolder else os.getcwd()
+        self.params = self.create_params(Model, parameters)
         self.filepath = create_folder(self.rootfolder, str(Model.__name__), filepath)
-        self.params = create_params(Model, parameters)
         self.Model = Model
         self.local_filepath = None
+
+    def create_params(self, Model, parameters):
+        """
+        combine all parameters into one dictionary and export to json
+        note: done to pass all parameters to Model in blind init given setup of Goalie
+        
+        adding feature from Joe's code parameter class to pass keys as methods
+        TODO: figure out a better place for this
+        """
+        params=AttrDict() # TODO: set some defaults for all parameters passed      
+        params.update(Model.get_default_parameters())
+        params.update(parameters)
+        # Try ARG PARSE HERE?
+        parser = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        argument_default=argparse.SUPPRESS
+        )
+        def coords(s):
+            """
+            # https://stackoverflow.com/questions/9978880/python-argument-parser-list-of-list-or-tuple-of-tuples
+
+            """
+            try:
+                situp = []
+                for si in s.split('.'):
+                    situp.append(tuple(map(int, si.split(','))))
+                print(situp)
+                return situp
+            except:
+                raise argparse.ArgumentTypeError("Coordinates must be\
+                given divided by commas and dot e.g.: 'x,y.k,l,m'")
+
+        def namespace_to_dict(namespace):
+            """
+            to convert nested Namespace to dictionary format recursively
+            from stackoverflow
+            https://stackoverflow.com/questions/71845452/convert-argparse-namespace-to-dict-recursively
+            """
+            return {
+                k: namespace_to_dict(v) if isinstance(v, argparse.Namespace) else v
+                for k, v in vars(namespace).items()
+            }
+        
+
+        # TODO: this will have issues with nested dictionaries, need check for
+        for key, value in params.items():
+            print(key, value, type(value))
+            if key == "coordinates":
+                parser.add_argument(f"--{key}", type=coords)
+            else:
+                parser.add_argument(f"--{key}", type=type(value))
+        # parse user defined folder name if specified
+        # TODO: set up to concatenate names if multiple given, but
+        #       may want to change this structure later
+        parser.add_argument(f"--casefolder", type=str, action='append')
+        
+        args = parser.parse_args()
+        print(f'args passed from CLI: {namespace_to_dict(args)}')
+        print(f'casefolder all : {args.casefolder}')
+
+        # define as new subfolder
+        subfolder = "/"
+        for case in args.casefolder:
+            subfolder = subfolder + f"{case}_"
+        # strip last "_"
+        subfolder = subfolder[:-1]
+
+        print(f' casefolder specified as: {subfolder}')
+        self.rootfolder = self.rootfolder + subfolder
+
+        #update parameters with argparsed
+        params.update(namespace_to_dict(args))
+        print(params)
+
+        return params
+
+
 
     def setup_logging_file(self, filepath):
         # need to remove logging handler explicity to switch filepath if one has
         # previously initialised
         for handler in logging.root.handlers[:]:
             logging.root.removeHandler(handler)
+            
         logging.basicConfig(
             level=logging.INFO, 
             filename=os.path.join(filepath,"timesout.txt"),

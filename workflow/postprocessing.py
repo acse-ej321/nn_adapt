@@ -250,6 +250,27 @@ def create_plot_dictionary(json_path):
 
     return plot_dict
 
+def _set_min_max(minmax = None, update_values = None):
+    """
+    Updates a [min,max] list given a list of update values to consider, retaining
+    the min and max values only based on updated range
+
+    Args:
+        minmax (list): two digit list containing min, max value [min,max]
+        update_values (list): list containing additional values to consider in range
+
+    Returns:
+        minmax (list): updated [min,max]
+    """
+    # define default
+    if minmax is None:
+        return [float('-inf'), float('inf')]
+    
+    if update_values is None:
+        return minmax
+
+    return [min(minmax[0], *update_values),max(minmax[1], *update_values)]
+
 
 def plot_qoi_vs_dof(plot_dict, show=True, json_path=None):
     """
@@ -286,10 +307,6 @@ def plot_qoi_vs_dof(plot_dict, show=True, json_path=None):
     qoi_unit = first_method['qoi_unit']
     dof_name = first_method['dof_name']
     dof_unit = first_method['dof_unit']
-    
-    # Initialize variables for plot limits
-    # dof_min, dof_max = float('inf'), float('-inf')
-    # qoi_min, qoi_max = float('inf'), float('-inf')
 
     # Initialize variables for plot limits
     dof_min, dof_max = _set_min_max()
@@ -316,29 +333,6 @@ def plot_qoi_vs_dof(plot_dict, show=True, json_path=None):
     #Display the plot if requested
     if show:
         plt.show
-
-
-def _set_min_max(minmax = None, update_values = None):
-    """
-    Updates a [min,max] list given a list of update values to consider, retaining
-    the min and max values only based on updated range
-
-    Args:
-        minmax (list): two digit list containing min, max value [min,max]
-        update_values (list): list containing additional values to consider in range
-
-    Returns:
-        minmax (list): updated [min,max]
-    """
-    # define default
-    if minmax is None:
-        return [float('-inf'), float('inf')]
-    
-    if update_values is None:
-        return minmax
-
-    return [min(minmax[0], *update_values),max(minmax[1], *update_values)]
-
 
 
 def plot_cpu_vs_dof(plot_dict, show=True, json_path=None):
@@ -421,10 +415,6 @@ def plot_eqoi_vs_dof(plot_dict, show=True, json_path = None, benchmark='uniform'
     qoi_unit = first_method['qoi_unit']
     dof_name = first_method['dof_name']
     dof_unit = first_method['dof_unit']
-    
-    # Initialize variables for plot limits
-    # dof_min, dof_max = float('inf'), float('-inf')
-    # qoi_min, qoi_max = float('inf'), float('-inf')
 
     # Initialize variables for plot limits
     dof_min, dof_max = _set_min_max()

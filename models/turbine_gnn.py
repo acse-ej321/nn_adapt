@@ -115,8 +115,7 @@ class TurbineMeshSeq(gol_adj.GoalOrientedMeshSeq):
                 "convergence_criteria":"any", # options are "all" or "any"
                 
                 # adaptation kwargs
-                "indicator_method": "gnn", # added as flag for fp iteration, options "gnn"
-                "adaptor_method":"steady_anisotropic",
+                "adaptor_method":"hessian",
                 "fix_boundary": False, # ej321 Dec24 try with true
                 "boundary_labels": [5,6],
                 "area_labels": [7,8],

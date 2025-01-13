@@ -55,17 +55,21 @@ testa: test1 test2
 
 # Run full suite of test cases
 # for 
-test1:
-	for adapt in $(ADAPTOR); do \
-		for base in $(BASECASES); do \
-			for case in $(TESTCASES); do \
+run_convergence:
+	for base in $(BASECASES); do \
+		for case in $(TESTCASES); do \
+			python3 turbine_run_forward.py \
+			--adaptor_method "uniform" \
+			--miniter 6 \
+			--maxiter 14; \
+			for adapt in $(ADAPTOR); do \
 				echo $$adapt $$base $$case; \
-				python3 turbine_run_forward.py \
+				python3 turbine_run_convergence.py \
 				--adaptor_method $$adapt \
 				$$base \
 				$$case \
 				--miniter 3 \
-				--maxiter 14; \
+				--maxiter 20; \
 			done; \
 		done; \
 	done

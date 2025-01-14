@@ -58,10 +58,13 @@ testa: test1 test2
 run_convergence:
 	for base in $(BASECASES); do \
 		for case in $(TESTCASES); do \
+			echo $$base $$case; \
 			python3 turbine_run_forward.py \
 			--adaptor_method "uniform" \
+			$$base \
+			$$case \
 			--miniter 6 \
-			--maxiter 14; \
+			--maxiter 8; \
 			for adapt in $(ADAPTOR); do \
 				echo $$adapt $$base $$case; \
 				python3 turbine_run_convergence.py \
@@ -69,7 +72,7 @@ run_convergence:
 				$$base \
 				$$case \
 				--miniter 3 \
-				--maxiter 20; \
+				--maxiter 24; \
 			done; \
 		done; \
 	done
@@ -78,6 +81,7 @@ test_casefolder_name:
 	for base in $(BASECASES); do \
 		for case in $(TESTCASES); do \
 			python3 turbine_run_convergence.py \
+			--adaptor_method hessian \
 			$$case \
 			$$base \
 			--maxiter 2; \
